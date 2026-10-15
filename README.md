@@ -95,6 +95,19 @@ npm start
 
 ---
 
+## 📑 Interactive Swagger UI Documentation
+
+You can test all REST endpoints directly in your browser:
+* **URL**: [http://localhost:5000/docs](http://localhost:5000/docs) (or `http://localhost:5000/api-docs`)
+* **How to authenticate**:
+  1. Open `/api/auth/login`, click **"Try it out"**, and execute with `admin@vdat.local` / `admin123`.
+  2. Copy the returned `token`.
+  3. Scroll to the top right, click **"Authorize"**, paste the token, and click **Authorize**.
+  4. You can now test any protected endpoint (get cameras, update zones, list violations, review violations)!
+
+
+---
+
 ## 📡 WebSocket Endpoints
 
 | Endpoint | Purpose | Direction |
