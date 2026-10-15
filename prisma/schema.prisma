@@ -1,0 +1,90 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  POLICE
+  ADMIN
+}
+
+enum ViolationStatus {
+  PENDING_REVIEW
+  CONFIRMED
+  DISMISSED
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  fullName     String
+  role         Role          @default(POLICE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  violations   Violation[]
+
+  @@map("users")
+}
+
+model Camera {
+  id         String        @id // e.g. "cam-01"
+  name       String
+  location   String
+  rtspUrl    String?
+  isActive   Boolean       @default(true)
+  lastSeenAt DateTime?
+  metadata   Json?         // { fps, width, height, tracker, model }
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  config     CameraConfig?
+  violations Violation[]
+
+  @@map("cameras")
+}
+
+model CameraConfig {
+  id           String   @id @default(uuid())
+  cameraId     String   @unique
+  camera       Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  lanes        Json     // Array of lane polygon coordinate sets
+  intersection Json     // Intersection polygon coordinates
+  lightBox     Json?    // Traffic light detection bounding box
+  version      Int      @default(1)
+  updatedAt    DateTime @updatedAt
+
+  @@map("camera_configs")
+}
+
+model Violation {
+  id              String          @id @default(uuid())
+  cameraId        String
+  camera          Camera          @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  trackId         Int
+  vehicleClass    String          // e.g. "motorcycle", "car"
+  classId         Int
+  frameNumber     Int
+  timestamp       String          // e.g. "19.97s"
+  lightState      String          // "red"
+  bbox            Json            // [x1, y1, x2, y2]
+  confidence      Float?
+  snapshotUrl     String?         // Path / URL to JPG evidence thumbnail
+  evidenceClipUrl String?         // Path / URL to MP4 proof clip
+  status          ViolationStatus @default(PENDING_REVIEW)
+  reviewedById    String?
+  reviewedBy      User?           @relation(fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([cameraId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("violations")
+}
