@@ -12,6 +12,9 @@ import violationRoutes from './routes/violation.routes.js';
 import evidenceRoutes from './routes/evidence.routes.js';
 import statsRoutes from './routes/stats.routes.js';
 
+import swaggerUi from 'swagger-ui-express';
+import { swaggerDocument } from './config/swagger.js';
+
 export function createApp(): express.Application {
   const app = express();
 
@@ -19,8 +22,14 @@ export function createApp(): express.Application {
   app.use(
     helmet({
       crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow frontend to fetch images/videos
+      contentSecurityPolicy: false, // Enable Swagger UI assets and inline scripts
     })
   );
+
+  // Mount Swagger UI Documentation
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+
 
   // CORS for local dev and Vercel production domains
   app.use(

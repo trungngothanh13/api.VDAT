@@ -46,9 +46,11 @@ async function bootstrap() {
     console.log(`🚀 api.VDAT Backend Server running on port ${config.port}`);
     console.log(`📡 Environment: ${config.nodeEnv}`);
     console.log(`🔗 REST API:    http://localhost:${config.port}/api`);
+    console.log(`📑 Swagger UI:  http://localhost:${config.port}/docs`);
     console.log(`📥 AI Stream:   ws://localhost:${config.port}/ws/inference`);
     console.log(`📤 Web Stream:  ws://localhost:${config.port}/ws/client`);
     console.log('='.repeat(60));
+
   });
 
   const shutdown = async () => {
