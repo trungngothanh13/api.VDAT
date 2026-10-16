@@ -1,4 +1,8 @@
 import { WebSocket } from 'ws';
+import { EventEmitter } from 'events';
+
+export const evidenceEvents = new EventEmitter();
+evidenceEvents.setMaxListeners(100);
 
 export class WebSocketManager {
   private static instance: WebSocketManager;
@@ -43,7 +47,11 @@ export class WebSocketManager {
   }
 
   public sendToInference(cameraId: string, payload: any): boolean {
-    const ws = this.inferenceSockets.get(cameraId);
+    let ws = this.inferenceSockets.get(cameraId);
+    if (!ws && this.inferenceSockets.size > 0) {
+      // Fallback to first available active inference socket
+      ws = this.inferenceSockets.values().next().value;
+    }
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(payload));
       return true;

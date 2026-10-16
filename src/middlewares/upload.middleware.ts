@@ -11,7 +11,11 @@ const storage = multer.diskStorage({
     cb(null, evidenceUploadDir);
   },
   filename: (_req, file, cb) => {
-    // Preserve original filename or generate unique name
+    // Preserve original filename if it's a violation clip for deterministic on-demand retrieval
+    if (file.originalname.startsWith('violation_')) {
+      cb(null, file.originalname);
+      return;
+    }
     const ext = path.extname(file.originalname);
     const basename = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
     const timestamp = Date.now();
