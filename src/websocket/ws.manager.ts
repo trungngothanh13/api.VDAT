@@ -9,12 +9,6 @@ export class WebSocketManager {
   // Connected web frontend clients
   private clientSockets: Set<WebSocket> = new Set();
 
-  // Pending on-demand clip requests: Map<requestId, { resolve, reject }>
-  private pendingClipRequests: Map<
-    string,
-    { resolve: (data: string) => void; reject: (err: Error) => void }
-  > = new Map();
-
   private constructor() {}
 
   public static getInstance(): WebSocketManager {
@@ -55,57 +49,6 @@ export class WebSocketManager {
       return true;
     }
     return false;
-  }
-
-  // --- On-Demand Evidence Fetching from ThunderCompute ---
-  public requestClipFromInference(cameraId: string, filename: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-
-      const timer = setTimeout(() => {
-        this.pendingClipRequests.delete(requestId);
-        reject(new Error(`Timeout waiting for video clip '${filename}' from camera '${cameraId}'.`));
-      }, 30000);
-
-      this.pendingClipRequests.set(requestId, {
-        resolve: (data) => {
-          clearTimeout(timer);
-          resolve(data);
-        },
-        reject: (err) => {
-          clearTimeout(timer);
-          reject(err);
-        },
-      });
-
-      const sent = this.sendToInference(cameraId, {
-        type: 'fetch_clip_request',
-        requestId,
-        filename,
-      });
-
-      if (!sent) {
-        clearTimeout(timer);
-        this.pendingClipRequests.delete(requestId);
-        reject(new Error(`Camera '${cameraId}' on ThunderCompute is currently offline.`));
-      }
-    });
-  }
-
-  public resolveClipRequest(requestId: string, data: string): void {
-    const req = this.pendingClipRequests.get(requestId);
-    if (req) {
-      req.resolve(data);
-      this.pendingClipRequests.delete(requestId);
-    }
-  }
-
-  public rejectClipRequest(requestId: string, error: string): void {
-    const req = this.pendingClipRequests.get(requestId);
-    if (req) {
-      req.reject(new Error(error));
-      this.pendingClipRequests.delete(requestId);
-    }
   }
 
 

@@ -14,4 +14,6 @@ export const config = {
     .map((o) => o.trim()),
   uploadDir: path.resolve(process.env.UPLOAD_DIR || './uploads'),
   maxFileSizeMb: parseInt(process.env.MAX_FILE_SIZE_MB || '100', 10),
+  // ThunderCompute evidence server URL (HTTP endpoint serving video clips)
+  thunderComputeUrl: process.env.THUNDER_COMPUTE_URL || 'http://localhost:8080',
 };

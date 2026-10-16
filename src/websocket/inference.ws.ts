@@ -80,6 +80,19 @@ export function handleInferenceConnection(ws: WebSocket): void {
             snapshotUrl = `/uploads/evidence/${filename}`;
           }
 
+          // Ensure camera exists (in case violation arrives before camera_init)
+          await prisma.camera.upsert({
+            where: { id: cameraId },
+            update: { lastSeenAt: new Date() },
+            create: {
+              id: cameraId,
+              name: `Camera ${cameraId}`,
+              location: 'Unknown',
+              isActive: true,
+              lastSeenAt: new Date(),
+            },
+          });
+
           // Persist violation into PostgreSQL
           const record = await prisma.violation.create({
             data: {
@@ -134,16 +147,6 @@ export function handleInferenceConnection(ws: WebSocket): void {
             frameNumber: event.frame_number,
             evidenceClipUrl,
           });
-          break;
-        }
-
-        case 'fetch_clip_response': {
-          const { requestId, data, error } = message;
-          if (error) {
-            wsManager.rejectClipRequest(requestId, error);
-          } else {
-            wsManager.resolveClipRequest(requestId, data);
-          }
           break;
         }
 
