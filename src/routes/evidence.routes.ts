@@ -1,10 +1,44 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { uploadEvidence } from '../middlewares/upload.middleware.js';
 import { prisma } from '../config/prisma.js';
+import { config } from '../config/env.js';
 import { wsManager } from '../websocket/ws.manager.js';
 
 const router = Router();
+
+// On-demand video proof download: fetches directly from ThunderCompute when requested
+router.get(
+  '/download/:cameraId/:filename',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { cameraId, filename } = req.params;
+      const sanitizedFilename = path.basename(filename);
+      const localFilePath = path.join(config.uploadDir, 'evidence', sanitizedFilename);
+
+      // 1. If already cached locally, serve immediately
+      if (fs.existsSync(localFilePath)) {
+        res.download(localFilePath, sanitizedFilename);
+        return;
+      }
+
+      // 2. Otherwise, fetch on-demand from ThunderCompute over WebSocket
+      console.log(`📡 [On-Demand Evidence] Fetching '${sanitizedFilename}' from ThunderCompute (${cameraId})...`);
+      const b64Data = await wsManager.requestClipFromInference(cameraId, sanitizedFilename);
+
+      // Save cached copy locally
+      const buffer = Buffer.from(b64Data, 'base64');
+      fs.writeFileSync(localFilePath, buffer);
+
+      // Stream download directly to client
+      res.download(localFilePath, sanitizedFilename);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 
 router.post(
   '/upload',

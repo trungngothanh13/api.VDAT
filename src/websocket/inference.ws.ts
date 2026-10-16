@@ -107,12 +107,13 @@ export function handleInferenceConnection(ws: WebSocket): void {
         }
 
         case 'evidence_clip_ready': {
-          const { cameraId, event, clipPath } = message;
-          const filename = path.basename(clipPath);
-          const evidenceClipUrl = `/uploads/evidence/${filename}`;
+          const { cameraId, event, clipPath, filename: msgFilename } = message;
+          const filename = msgFilename || path.basename(clipPath);
+          // On-demand download URL: only fetched from ThunderCompute when demanded by user!
+          const evidenceClipUrl = `/api/evidence/download/${cameraId}/${filename}`;
 
           // Find and update the violation record
-          const updated = await prisma.violation.updateMany({
+          await prisma.violation.updateMany({
             where: {
               cameraId,
               trackId: event.track_id,
@@ -123,7 +124,7 @@ export function handleInferenceConnection(ws: WebSocket): void {
             },
           });
 
-          console.log(`📹 [Inference WS] Evidence clip linked for track #${event.track_id}: ${evidenceClipUrl}`);
+          console.log(`📹 [Inference WS] On-demand evidence clip registered for track #${event.track_id}: ${evidenceClipUrl}`);
 
           // Broadcast clip update to clients
           wsManager.broadcastToClients({
@@ -133,6 +134,16 @@ export function handleInferenceConnection(ws: WebSocket): void {
             frameNumber: event.frame_number,
             evidenceClipUrl,
           });
+          break;
+        }
+
+        case 'fetch_clip_response': {
+          const { requestId, data, error } = message;
+          if (error) {
+            wsManager.rejectClipRequest(requestId, error);
+          } else {
+            wsManager.resolveClipRequest(requestId, data);
+          }
           break;
         }
 

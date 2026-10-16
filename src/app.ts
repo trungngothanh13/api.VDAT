@@ -59,8 +59,18 @@ export function createApp(): express.Application {
   // Serve static evidence snapshots and video clips
   app.use('/uploads', express.static(config.uploadDir));
 
+  // Serve static web dashboard files
+  const publicDir = path.resolve('./public');
+  app.use(express.static(publicDir));
+
+  // Live Camera Stream & Violation Proofs Explorer
+  app.get(['/', '/live', '/monitor'], (_req, res) => {
+    res.sendFile(path.join(publicDir, 'index.html'));
+  });
+
   // Health check endpoint
   app.get('/health', (_req, res) => {
+
     res.json({
       status: 'UP',
       service: 'api.VDAT',

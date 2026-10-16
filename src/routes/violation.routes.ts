@@ -8,8 +8,9 @@ import { authenticateToken } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
-router.get('/', authenticateToken, listViolations);
-router.get('/:id', authenticateToken, getViolation);
+router.get('/', listViolations);
+router.get('/:id', getViolation);
 router.patch('/:id/status', authenticateToken, updateViolationStatus);
+
 
 export default router;

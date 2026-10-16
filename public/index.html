@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VDAT Live Surveillance & Evidence Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(26, 32, 44, 0.7);
+      --border: rgba(255, 255, 255, 0.08);
+      --primary: #3b82f6;
+      --danger: #ef4444;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+    .badge {
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-live {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge-live::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: var(--danger);
+      border-radius: 50%;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+    .nav-links {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .nav-btn {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      text-decoration: none;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .nav-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 20px;
+      padding: 20px 24px;
+      flex: 1;
+      max-width: 1700px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    @media (max-width: 1080px) {
+      .main-layout { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .video-viewport {
+      position: relative;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 480px;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+    }
+    #stream-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .stream-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .hud-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 16px 18px;
+      background: rgba(15, 23, 42, 0.5);
+      border-top: 1px solid var(--border);
+    }
+    .stat-box {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      border-radius: 8px;
+    }
+    .stat-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+    .evidence-feed {
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      max-height: calc(100vh - 140px);
+      padding: 12px;
+      gap: 10px;
+    }
+    .violation-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      gap: 12px;
+      transition: all 0.2s;
+    }
+    .violation-card:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(239, 68, 68, 0.3);
+      transform: translateY(-1px);
+    }
+    .violation-thumb {
+      width: 100px;
+      height: 65px;
+      border-radius: 6px;
+      object-fit: cover;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+    .violation-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .violation-title {
+      font-weight: 600;
+      font-size: 0.88rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .violation-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .violation-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .btn-action {
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 500;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s;
+    }
+    .btn-action:hover {
+      background: rgba(59, 130, 246, 0.3);
+      color: #fff;
+    }
+    .btn-download {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+    .btn-download:hover {
+      background: rgba(16, 185, 129, 0.3);
+      color: #fff;
+    }
+    /* Modal for full snapshot */
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .modal.active { display: flex; }
+    .modal-content {
+      max-width: 90vw;
+      max-height: 85vh;
+      border-radius: 10px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>🚦 VDAT Surveillance System</span>
+      <span class="badge badge-live" id="stream-status">Waiting for AI Stream</span>
+    </div>
+    <div class="nav-links">
+      <a href="/docs" class="nav-btn" target="_blank">📑 Swagger UI</a>
+      <a href="/api/stats/overview" class="nav-btn" target="_blank">📊 Stats JSON</a>
+    </div>
+  </header>
+
+  <main class="main-layout">
+    <!-- Left: Live Camera Viewport -->
+    <div class="card">
+      <div class="card-header">
+        <span>📹 Live Camera Stream (<span id="camera-id">cam-01</span>)</span>
+        <span id="light-indicator" style="font-size: 0.85rem; font-weight: 600;">Light: Unknown</span>
+      </div>
+      <div class="video-viewport">
+        <img id="stream-img" src="" alt="Live Video Feed" style="display: none;" />
+        <div class="stream-placeholder" id="placeholder">
+          <div class="spinner"></div>
+          <span>Connecting to stream relay...</span>
+          <span style="font-size: 0.78rem; color: var(--text-muted);">Ensure ThunderCompute is running with <code>--ws</code></span>
+        </div>
+      </div>
+      <div class="hud-bar">
+        <div class="stat-box">
+          <div class="stat-label">Active Vehicles</div>
+          <div class="stat-value" id="stat-vehicles">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Total Tracked</div>
+          <div class="stat-value" id="stat-tracked">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Violation Count</div>
+          <div class="stat-value" style="color: var(--danger);" id="stat-violations">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Stream FPS</div>
+          <div class="stat-value" id="stat-fps">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Evidence Proofs & Downloads -->
+    <div class="card">
+      <div class="card-header">
+        <span>🚨 Violation Proofs (<span id="evidence-count">0</span>)</span>
+        <button class="nav-btn" style="padding: 4px 10px; font-size: 0.75rem;" onclick="loadStoredViolations()">🔄 Refresh</button>
+      </div>
+      <div class="evidence-feed" id="evidence-feed">
+        <div style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.85rem;">
+          Loading recorded violations...
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Image Modal -->
+  <div class="modal" id="image-modal" onclick="closeModal()">
+    <img class="modal-content" id="modal-img" src="" />
+  </div>
+
+  <script>
+    const streamImg = document.getElementById('stream-img');
+    const placeholder = document.getElementById('placeholder');
+    const streamStatus = document.getElementById('stream-status');
+    const statVehicles = document.getElementById('stat-vehicles');
+    const statTracked = document.getElementById('stat-tracked');
+    const statViolations = document.getElementById('stat-violations');
+    const statFps = document.getElementById('stat-fps');
+    const lightIndicator = document.getElementById('light-indicator');
+    const evidenceFeed = document.getElementById('evidence-feed');
+    const evidenceCount = document.getElementById('evidence-count');
+
+    // 1. WebSocket Live Stream Connection
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/client`;
+    let ws = null;
+
+    function connectWebSocket() {
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        streamStatus.textContent = 'Connected (Standby)';
+        streamStatus.style.color = '#38bdf8';
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === 'live_frame') {
+            placeholder.style.display = 'none';
+            streamImg.style.display = 'block';
+            streamImg.src = `data:image/jpeg;base64,${msg.image}`;
+
+            streamStatus.textContent = 'LIVE STREAMING';
+            streamStatus.style.color = 'var(--danger)';
+
+            if (msg.telemetry) {
+              statVehicles.textContent = msg.telemetry.vehicle_count ?? 0;
+              statTracked.textContent = msg.telemetry.total_tracked ?? 0;
+              statViolations.textContent = msg.telemetry.violations_count ?? 0;
+              statFps.textContent = `${msg.telemetry.fps ?? 30} FPS`;
+
+              const light = (msg.telemetry.light_state || 'unknown').toUpperCase();
+              lightIndicator.textContent = `Light: ${light}`;
+              lightIndicator.style.color = light === 'RED' ? 'var(--danger)' : light === 'GREEN' ? 'var(--success)' : 'var(--warning)';
+            }
+          } else if (msg.type === 'violation_alert') {
+            prependViolationCard(msg.violation);
+          } else if (msg.type === 'evidence_clip_update') {
+            updateViolationClipLink(msg);
+          }
+        } catch (e) {
+          console.error('WS parse error:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        streamStatus.textContent = 'Disconnected (Reconnecting...)';
+        streamStatus.style.color = 'var(--text-muted)';
+        setTimeout(connectWebSocket, 3000);
+      };
+
+      ws.onerror = (err) => {
+        console.error('WS error:', err);
+      };
+    }
+
+    connectWebSocket();
+
+    // 2. Fetch Stored Violations from PostgreSQL
+    async function loadStoredViolations() {
+      try {
+        const res = await fetch('/api/violations?limit=100');
+        const json = await res.json();
+        const violations = json.data || [];
+
+        evidenceCount.textContent = violations.length;
+        evidenceFeed.innerHTML = '';
+
+        if (violations.length === 0) {
+          evidenceFeed.innerHTML = '<div style="text-align: center; padding: 24px; color: var(--text-muted);">No violations recorded yet.</div>';
+          return;
+        }
+
+        violations.forEach(v => appendViolationCard(v));
+      } catch (err) {
+        evidenceFeed.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--danger);">Failed to load violations: ${err.message}</div>`;
+      }
+    }
+
+    function createViolationCard(v) {
+      const card = document.createElement('div');
+      card.className = 'violation-card';
+      card.id = `v-card-${v.id}`;
+
+      const snapshotSrc = v.snapshotUrl ? v.snapshotUrl : '';
+      const clipSrc = v.evidenceClipUrl ? v.evidenceClipUrl : '';
+
+      card.innerHTML = `
+        <img class="violation-thumb" src="${snapshotSrc || 'data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"65\"><rect fill=\"#1e293b\" width=\"100\" height=\"65\"/><text fill=\"#64748b\" x=\"50%\" y=\"50%\" dominant-baseline=\"middle\" text-anchor=\"middle\" font-size=\"10\">No Image</text></svg>'}"
+             onclick="openModal('${snapshotSrc}')"
+             title="Click to view full image" alt="Snapshot" />
+        <div class="violation-info">
+          <div>
+            <div class="violation-title">
+              <span>🚨 #${v.trackId}</span>
+              <span style="text-transform: capitalize; color: #f1f5f9;">${v.vehicleClass}</span>
+              <span class="badge" style="background: rgba(239,68,68,0.2); color: #fca5a5; font-size: 0.65rem;">RED LIGHT</span>
+            </div>
+            <div class="violation-meta">
+              Frame ${v.frameNumber} • Time: ${v.timestamp} • ${v.confidence ? `Conf: ${(v.confidence * 100).toFixed(0)}%` : ''}
+            </div>
+          </div>
+          <div class="violation-actions">
+            ${snapshotSrc ? `<a href="${snapshotSrc}" download class="btn-action btn-download">📥 Snapshot</a>` : ''}
+            ${clipSrc ? `<a href="${clipSrc}" download class="btn-action" style="background: rgba(168,85,247,0.2); color: #d8b4fe; border-color: rgba(168,85,247,0.4);">🎬 Video Clip</a>` : `<span style="font-size: 0.7rem; color: var(--text-muted); align-self: center;">Clip encoding...</span>`}
+          </div>
+        </div>
+      `;
+      return card;
+    }
+
+    function appendViolationCard(v) {
+      evidenceFeed.appendChild(createViolationCard(v));
+    }
+
+    function prependViolationCard(v) {
+      const card = createViolationCard(v);
+      evidenceFeed.insertBefore(card, evidenceFeed.firstChild);
+      const current = parseInt(evidenceCount.textContent || '0', 10);
+      evidenceCount.textContent = current + 1;
+    }
+
+    function updateViolationClipLink(msg) {
+      const cards = document.querySelectorAll('.violation-card');
+      cards.forEach(card => {
+        if (card.textContent.includes(`#${msg.trackId}`) && card.textContent.includes(`Frame ${msg.frameNumber}`)) {
+          const actions = card.querySelector('.violation-actions');
+          if (actions && !actions.querySelector('a[href$=".mp4"]')) {
+            const clipLink = document.createElement('a');
+            clipLink.href = msg.evidenceClipUrl;
+            clipLink.download = '';
+            clipLink.className = 'btn-action';
+            clipLink.style.background = 'rgba(168,85,247,0.2)';
+            clipLink.style.color = '#d8b4fe';
+            clipLink.style.borderColor = 'rgba(168,85,247,0.4)';
+            clipLink.innerHTML = '🎬 Video Clip';
+            actions.appendChild(clipLink);
+          }
+        }
+      });
+    }
+
+    function openModal(src) {
+      if (!src) return;
+      document.getElementById('modal-img').src = src;
+      document.getElementById('image-modal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('image-modal').classList.remove('active');
+    }
+
+    // Load existing violations on startup
+    loadStoredViolations();
+  </script>
+</body>
+</html>
