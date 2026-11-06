@@ -14,6 +14,4 @@ export const config = {
     .map((o) => o.trim()),
   uploadDir: path.resolve(process.env.UPLOAD_DIR || './uploads'),
   maxFileSizeMb: parseInt(process.env.MAX_FILE_SIZE_MB || '100', 10),
-  // Optional legacy HTTP fallback URL
-  thunderComputeUrl: process.env.THUNDER_COMPUTE_URL || '',
 };

@@ -1,8 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { Readable } from 'stream';
-import { finished } from 'stream/promises';
 import { uploadEvidence } from '../middlewares/upload.middleware.js';
 import { prisma } from '../config/prisma.js';
 import { config } from '../config/env.js';
@@ -60,26 +58,6 @@ router.get(
         }
       } else {
         console.warn(`⚠️ [On-Demand Evidence] AI Engine is not connected for camera '${cameraId}'.`);
-      }
-
-      // 3. Fallback: If thunderComputeUrl is explicitly configured (not default localhost:8080), try HTTP fetch
-      if (config.thunderComputeUrl && !config.thunderComputeUrl.includes('localhost:8080')) {
-        try {
-          const evidenceUrl = `${config.thunderComputeUrl}/${sanitizedFilename}`;
-          console.log(`📡 [On-Demand Evidence] Trying legacy HTTP fallback from ${evidenceUrl}`);
-
-          const response = await fetch(evidenceUrl, { signal: AbortSignal.timeout(15000) });
-          if (response.ok && response.body) {
-            fs.mkdirSync(path.dirname(localFilePath), { recursive: true });
-            const fileStream = fs.createWriteStream(localFilePath);
-            // @ts-ignore
-            await finished(Readable.fromWeb(response.body as any).pipe(fileStream));
-            res.download(localFilePath, sanitizedFilename);
-            return;
-          }
-        } catch {
-          // Fall through to 404
-        }
       }
 
       res.status(404).json({
@@ -145,6 +123,7 @@ router.post(
           violationId: updatedRecord.id,
           cameraId: updatedRecord.cameraId,
           trackId: updatedRecord.trackId,
+          frameNumber: updatedRecord.frameNumber,
           evidenceClipUrl: fileUrl,
         });
       }
