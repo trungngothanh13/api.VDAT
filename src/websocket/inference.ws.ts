@@ -19,9 +19,10 @@ export function handleInferenceConnection(ws: WebSocket): void {
 
       switch (message.type) {
         case 'camera_init': {
-          const { cameraId, pipeline } = message;
+          const { cameraId, pipeline, ingestMode } = message;
           boundCameraId = cameraId;
-          wsManager.registerInference(cameraId, ws);
+          const resolvedMode = ingestMode || pipeline?.ingestMode || 'local';
+          wsManager.registerInference(cameraId, ws, resolvedMode);
 
           // Update camera in DB
           const camera = await prisma.camera.upsert({
@@ -122,8 +123,7 @@ export function handleInferenceConnection(ws: WebSocket): void {
         case 'evidence_clip_ready': {
           const { cameraId, event, clipPath, filename: msgFilename } = message;
           const filename = msgFilename || path.basename(clipPath);
-          // On-demand download URL: only fetched from ThunderCompute when demanded by user!
-          const evidenceClipUrl = `/api/evidence/download/${cameraId}/${filename}`;
+          const evidenceClipUrl = `/api/evidence/stream/${cameraId}/${filename}`;
 
           // Find and update the violation record
           await prisma.violation.updateMany({

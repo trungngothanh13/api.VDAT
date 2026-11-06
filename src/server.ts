@@ -1,4 +1,5 @@
 import http from 'http';
+import jwt from 'jsonwebtoken';
 import { WebSocketServer } from 'ws';
 
 import { createApp } from './app.js';
@@ -33,6 +34,26 @@ async function bootstrap() {
         wssInference.emit('connection', ws, request);
       });
     } else if (pathname === '/ws/client' || pathname.startsWith('/ws/client/')) {
+      const tokenParam = url.searchParams.get('token');
+      const authHeader = request.headers.authorization;
+      const bearerToken =
+        authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+      const token = tokenParam || bearerToken;
+
+      if (!token) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      try {
+        jwt.verify(token, config.jwtSecret);
+      } catch {
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
       wssClient.handleUpgrade(request, socket, head, (ws) => {
         wssClient.emit('connection', ws, request);
       });
