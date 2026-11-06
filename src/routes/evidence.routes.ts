@@ -11,6 +11,118 @@ import { wsManager, evidenceEvents } from '../websocket/ws.manager.js';
 const execFileAsync = promisify(execFile);
 const router = Router();
 
+// Temporary Ephemeral Cache Policy (prevents backend storage from flooding)
+const EVIDENCE_CLIP_TTL_MS = parseInt(process.env.EVIDENCE_CLIP_TTL_MS || String(10 * 60 * 1000), 10); // 10 minutes
+const MAX_CACHED_CLIPS = parseInt(process.env.MAX_CACHED_CLIPS || '15', 10);
+const MAX_CACHED_SNAPSHOTS = parseInt(process.env.MAX_CACHED_SNAPSHOTS || '100', 10);
+const clipCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Marks a video evidence file as temporary: refreshes its inactivity TTL timer
+ * and enforces strict LRU cache bounds on `uploads/evidence` so the backend server disk never floods.
+ */
+export function touchTemporaryEvidence(filePath: string): void {
+  if (!filePath.endsWith('.mp4')) return;
+
+  const existingTimer = clipCleanupTimers.get(filePath);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  try {
+    const now = new Date();
+    if (fs.existsSync(filePath)) {
+      fs.utimesSync(filePath, now, now);
+    }
+  } catch {
+    // Ignore utimes errors
+  }
+
+  const timer = setTimeout(() => {
+    clipCleanupTimers.delete(filePath);
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`[Evidence Cache] Auto-purged expired temporary clip: ${path.basename(filePath)}`);
+      }
+    } catch {
+      // Ignore unlink errors
+    }
+  }, EVIDENCE_CLIP_TTL_MS);
+
+  if (typeof timer.unref === 'function') {
+    timer.unref();
+  }
+  clipCleanupTimers.set(filePath, timer);
+
+  enforceEvidenceCacheLimits();
+}
+
+export function enforceEvidenceCacheLimits(): void {
+  const evidenceDir = path.join(config.uploadDir, 'evidence');
+  if (!fs.existsSync(evidenceDir)) return;
+
+  try {
+    const entries = fs.readdirSync(evidenceDir).map((name) => {
+      const fullPath = path.join(evidenceDir, name);
+      try {
+        const stat = fs.statSync(fullPath);
+        return { name, fullPath, mtimeMs: stat.mtimeMs, isFile: stat.isFile() };
+      } catch {
+        return null;
+      }
+    });
+
+    const validEntries = entries.filter(
+      (e): e is { name: string; fullPath: string; mtimeMs: number; isFile: boolean } =>
+        Boolean(e && e.isFile)
+    );
+
+    // 1. Evict oldest temporary MP4 clips beyond MAX_CACHED_CLIPS or older than TTL
+    const nowMs = Date.now();
+    const mp4Files = validEntries
+      .filter((e) => e.name.endsWith('.mp4'))
+      .sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+    for (let i = 0; i < mp4Files.length; i++) {
+      const item = mp4Files[i];
+      const isExpired = nowMs - item.mtimeMs > EVIDENCE_CLIP_TTL_MS;
+      const isOverLimit = mp4Files.length - i > MAX_CACHED_CLIPS;
+      if (isExpired || isOverLimit) {
+        try {
+          fs.unlinkSync(item.fullPath);
+          const t = clipCleanupTimers.get(item.fullPath);
+          if (t) {
+            clearTimeout(t);
+            clipCleanupTimers.delete(item.fullPath);
+          }
+          console.log(`[Evidence Cache] Evicted temporary video clip: ${item.name}`);
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
+    // 2. Evict oldest JPG snapshots beyond MAX_CACHED_SNAPSHOTS
+    const jpgFiles = validEntries
+      .filter((e) => e.name.endsWith('.jpg') || e.name.endsWith('.jpeg'))
+      .sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+    if (jpgFiles.length > MAX_CACHED_SNAPSHOTS) {
+      const toRemove = jpgFiles.slice(0, jpgFiles.length - MAX_CACHED_SNAPSHOTS);
+      for (const item of toRemove) {
+        try {
+          fs.unlinkSync(item.fullPath);
+        } catch {
+          // Ignore
+        }
+      }
+    }
+  } catch {
+    // Ignore directory scan errors
+  }
+}
+
 /**
  * Ensures an uploaded MP4 file uses H.264 (yuv420p + faststart) so HTML5 <video>
  * elements can stream and seek it natively in all modern browsers.
@@ -69,6 +181,11 @@ async function ensureBrowserStreamableMp4(filePath: string): Promise<void> {
  * when `?download=1` is passed.
  */
 function streamOrDownloadVideo(req: Request, res: Response, filePath: string, filename: string): void {
+  // Refresh temporary TTL whenever a video clip in uploads/evidence is accessed
+  if (filePath.includes(path.join('uploads', 'evidence'))) {
+    touchTemporaryEvidence(filePath);
+  }
+
   const forceDownload = req.query.download === '1' || req.query.download === 'true';
   if (forceDownload) {
     res.download(filePath, filename);
@@ -252,6 +369,9 @@ router.post(
 
       if (isVideo) {
         await ensureBrowserStreamableMp4(req.file.path);
+        touchTemporaryEvidence(req.file.path);
+      } else {
+        enforceEvidenceCacheLimits();
       }
 
       const effectiveCameraId = cameraId || 'cam-01';

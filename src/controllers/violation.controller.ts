@@ -1,7 +1,10 @@
 import { Response, NextFunction } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { z } from 'zod';
 import { ViolationStatus } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
+import { config } from '../config/env.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
 
 export async function listViolations(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
@@ -97,6 +100,19 @@ export async function updateViolationStatus(req: AuthRequest, res: Response, nex
         reviewedBy: { select: { id: true, fullName: true } },
       },
     });
+
+    // If a violation is dismissed, immediately purge any cached temporary video clip on disk
+    if (status === ViolationStatus.DISMISSED) {
+      const clipName = `violation_${updated.cameraId}_id${updated.trackId}_f${updated.frameNumber}.mp4`;
+      const clipPath = path.join(config.uploadDir, 'evidence', clipName);
+      try {
+        if (fs.existsSync(clipPath)) {
+          fs.unlinkSync(clipPath);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
 
     res.json(updated);
   } catch (err) {

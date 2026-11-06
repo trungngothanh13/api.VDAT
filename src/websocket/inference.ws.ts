@@ -4,6 +4,7 @@ import path from 'path';
 import { prisma } from '../config/prisma.js';
 import { config } from '../config/env.js';
 import { wsManager } from './ws.manager.js';
+import { enforceEvidenceCacheLimits } from '../routes/evidence.routes.js';
 
 const evidenceDir = path.join(config.uploadDir, 'evidence');
 fs.mkdirSync(evidenceDir, { recursive: true });
@@ -79,6 +80,7 @@ export function handleInferenceConnection(ws: WebSocket): void {
             const buffer = Buffer.from(evidenceImage, 'base64');
             fs.writeFileSync(filepath, buffer);
             snapshotUrl = `/uploads/evidence/${filename}`;
+            enforceEvidenceCacheLimits();
           }
 
           // Ensure camera exists (in case violation arrives before camera_init)
