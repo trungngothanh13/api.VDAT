@@ -53,6 +53,19 @@ export class WebSocketManager {
     }
   }
 
+  public hasActiveInference(cameraId: string): boolean {
+    const ws = this.inferenceSockets.get(cameraId);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      return true;
+    }
+    for (const sock of this.inferenceSockets.values()) {
+      if (sock.readyState === WebSocket.OPEN) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   public isInferenceIngestingFromWeb(cameraId: string): boolean {
     const ws = this.inferenceSockets.get(cameraId);
     const mode = this.inferenceModes.get(cameraId);

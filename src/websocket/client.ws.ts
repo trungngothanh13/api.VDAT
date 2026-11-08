@@ -75,16 +75,20 @@ export function handleClientConnection(ws: WebSocket): void {
           const image = msg.image;
           if (!image) break;
 
-          // If Python AI Engine is connected in 'ws' ingestion mode, feed the frame into AI inference
-          if (wsManager.isInferenceIngestingFromWeb(cameraId)) {
+          // Whenever a Python AI Engine is connected, feed the web frame into AI inference
+          // so the AI Engine draws updated zones, tracks vehicles, and broadcasts the annotated frame.
+          if (wsManager.hasActiveInference(cameraId)) {
+            wsManager.setInferenceMode(cameraId, 'ws');
             wsManager.sendToInference(cameraId, {
               type: 'ingest_frame',
               cameraId,
+              sourceType: msg.sourceType || 'web_stream',
+              frameNumber: msg.frameNumber || 0,
               image,
               timestamp: msg.timestamp || Date.now(),
             });
           } else {
-            // Standalone camera stream mode: relay directly to all connected monitoring clients
+            // Standalone camera stream mode (no AI Engine connected): relay directly to monitoring clients
             wsManager.broadcastToClients({
               type: 'live_frame',
               cameraId,
