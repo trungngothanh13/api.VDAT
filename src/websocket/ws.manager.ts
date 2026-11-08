@@ -43,14 +43,12 @@ export class WebSocketManager {
     this.inferenceSockets.delete(cameraId);
     this.inferenceModes.delete(cameraId);
     console.log(`[WS Manager] AI Inference disconnected for camera: ${cameraId}`);
-    if (!this.webSourceSockets.has(cameraId)) {
-      this.broadcastToClients({
-        type: 'camera_status',
-        cameraId,
-        status: 'OFFLINE',
-        timestamp: Date.now(),
-      });
-    }
+    this.broadcastToClients({
+      type: 'camera_status',
+      cameraId,
+      status: 'OFFLINE',
+      timestamp: Date.now(),
+    });
   }
 
   public hasActiveInference(cameraId: string): boolean {
@@ -105,27 +103,13 @@ export class WebSocketManager {
   // --- Web-Fed Camera Transmitters (Browser Video File / Laptop Webcam) ---
   public registerWebSource(cameraId: string, ws: WebSocket): void {
     this.webSourceSockets.set(cameraId, ws);
-    console.log(`[WS Manager] Web-fed camera stream active for camera: ${cameraId}`);
-    this.broadcastToClients({
-      type: 'camera_status',
-      cameraId,
-      status: 'ONLINE',
-      timestamp: Date.now(),
-    });
+    console.log(`[WS Manager] Web-fed camera transmitter active for camera: ${cameraId}`);
   }
 
   public unregisterWebSource(cameraId: string, ws?: WebSocket): void {
     const current = this.webSourceSockets.get(cameraId);
     if (!ws || current === ws) {
       this.webSourceSockets.delete(cameraId);
-      if (!this.inferenceSockets.has(cameraId)) {
-        this.broadcastToClients({
-          type: 'camera_status',
-          cameraId,
-          status: 'OFFLINE',
-          timestamp: Date.now(),
-        });
-      }
     }
   }
 
@@ -165,11 +149,13 @@ export class WebSocketManager {
   }
 
   public getActiveCameras(): string[] {
-    const active = new Set<string>([
-      ...this.inferenceSockets.keys(),
-      ...this.webSourceSockets.keys(),
-    ]);
-    return Array.from(active);
+    const active: string[] = [];
+    for (const [camId, sock] of this.inferenceSockets.entries()) {
+      if (sock.readyState === WebSocket.OPEN) {
+        active.push(camId);
+      }
+    }
+    return active;
   }
 }
 

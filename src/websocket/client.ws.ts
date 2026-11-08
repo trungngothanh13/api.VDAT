@@ -29,14 +29,22 @@ export function handleClientConnection(ws: WebSocket): void {
           wsManager.registerWebSource(cameraId, ws);
           wsManager.setInferenceMode(cameraId, 'ws');
 
-          // If an AI Engine is connected, instruct it to switch to web-stream ingestion mode
-          wsManager.sendToInference(cameraId, {
-            type: 'switch_source',
-            cameraId,
-            sourceType: 'web_stream',
-            sourceValue: msg.label || msg.sourceType || 'web_stream',
-            loop: true,
-          });
+          if (wsManager.hasActiveInference(cameraId)) {
+            console.log(
+              `[Client WS] Web source (${msg.label || msg.sourceType}) initialized -> routing to connected AI Engine (${cameraId})`
+            );
+            wsManager.sendToInference(cameraId, {
+              type: 'switch_source',
+              cameraId,
+              sourceType: 'web_stream',
+              sourceValue: msg.label || msg.sourceType || 'web_stream',
+              loop: true,
+            });
+          } else {
+            console.warn(
+              `[Client WS] Web source (${msg.label || msg.sourceType}) initialized for ${cameraId}, but NO Python AI Engine is connected to /ws/inference`
+            );
+          }
 
           await prisma.camera
             .upsert({
@@ -75,8 +83,8 @@ export function handleClientConnection(ws: WebSocket): void {
           const image = msg.image;
           if (!image) break;
 
-          // Whenever a Python AI Engine is connected, feed the web frame into AI inference
-          // so the AI Engine draws updated zones, tracks vehicles, and broadcasts the annotated frame.
+          // Only forward frames when the Python AI Engine is connected.
+          // Never echo raw unannotated browser frames back as live_frame!
           if (wsManager.hasActiveInference(cameraId)) {
             wsManager.setInferenceMode(cameraId, 'ws');
             wsManager.sendToInference(cameraId, {
@@ -86,23 +94,6 @@ export function handleClientConnection(ws: WebSocket): void {
               frameNumber: msg.frameNumber || 0,
               image,
               timestamp: msg.timestamp || Date.now(),
-            });
-          } else {
-            // Standalone camera stream mode (no AI Engine connected): relay directly to monitoring clients
-            wsManager.broadcastToClients({
-              type: 'live_frame',
-              cameraId,
-              telemetry: msg.telemetry || {
-                frame_number: msg.frameNumber || 0,
-                timestamp: msg.timestamp || Date.now() / 1000,
-                fps: msg.fps || 20,
-                vehicle_count: 0,
-                total_tracked: 0,
-                light_state: 'unknown',
-                violations_count: 0,
-              },
-              image,
-              timestamp: Date.now(),
             });
           }
           break;
