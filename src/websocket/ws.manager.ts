@@ -14,8 +14,10 @@ export class WebSocketManager {
   // Active web-fed camera transmitters (video file or laptop webcam): Map<cameraId, WebSocket>
   private webSourceSockets: Map<string, WebSocket> = new Map();
 
-  // Connected web frontend clients
+  // Connected web frontend clients and which camera each client currently focuses on in Main View
   private clientSockets: Set<WebSocket> = new Set();
+  private clientFocusCamera: Map<WebSocket, string> = new Map();
+  private latestFrameByCamera: Map<string, any> = new Map();
 
   private constructor() {}
 
@@ -42,6 +44,7 @@ export class WebSocketManager {
   public unregisterInference(cameraId: string): void {
     this.inferenceSockets.delete(cameraId);
     this.inferenceModes.delete(cameraId);
+    this.latestFrameByCamera.delete(cameraId);
     console.log(`[WS Manager] AI Inference disconnected for camera: ${cameraId}`);
     this.broadcastToClients({
       type: 'camera_status',
@@ -53,46 +56,23 @@ export class WebSocketManager {
 
   public hasActiveInference(cameraId: string): boolean {
     const ws = this.inferenceSockets.get(cameraId);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      return true;
-    }
-    for (const sock of this.inferenceSockets.values()) {
-      if (sock.readyState === WebSocket.OPEN) {
-        return true;
-      }
-    }
-    return false;
+    return Boolean(ws && ws.readyState === WebSocket.OPEN);
   }
 
   public isInferenceIngestingFromWeb(cameraId: string): boolean {
     const ws = this.inferenceSockets.get(cameraId);
     const mode = this.inferenceModes.get(cameraId);
-    if (ws && ws.readyState === WebSocket.OPEN && mode === 'ws') {
-      return true;
-    }
-    for (const [id, sock] of this.inferenceSockets.entries()) {
-      if (sock.readyState === WebSocket.OPEN && this.inferenceModes.get(id) === 'ws') {
-        return true;
-      }
-    }
-    return false;
+    return Boolean(ws && ws.readyState === WebSocket.OPEN && mode === 'ws');
   }
 
   public setInferenceMode(cameraId: string, mode: string): void {
     if (this.inferenceSockets.has(cameraId)) {
       this.inferenceModes.set(cameraId, mode);
-    } else {
-      for (const id of this.inferenceSockets.keys()) {
-        this.inferenceModes.set(id, mode);
-      }
     }
   }
 
   public sendToInference(cameraId: string, payload: any): boolean {
-    let ws = this.inferenceSockets.get(cameraId);
-    if (!ws && this.inferenceSockets.size > 0) {
-      ws = this.inferenceSockets.values().next().value;
-    }
+    const ws = this.inferenceSockets.get(cameraId);
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(payload));
       return true;
@@ -124,15 +104,52 @@ export class WebSocketManager {
   // --- Client Sockets (Web Dashboard) ---
   public registerClient(ws: WebSocket): void {
     this.clientSockets.add(ws);
+    this.clientFocusCamera.set(ws, 'cam-01');
     console.log(`[WS Manager] Web dashboard client connected (Total: ${this.clientSockets.size})`);
   }
 
   public unregisterClient(ws: WebSocket): void {
     this.clientSockets.delete(ws);
+    this.clientFocusCamera.delete(ws);
     this.unregisterAllWebSourcesForSocket(ws);
     console.log(
       `[WS Manager] Web dashboard client disconnected (Remaining: ${this.clientSockets.size})`
     );
+  }
+
+  public setClientFocusCamera(ws: WebSocket, cameraId: string): void {
+    this.clientFocusCamera.set(ws, cameraId);
+    const cached = this.latestFrameByCamera.get(cameraId);
+    if (cached && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify(cached));
+      } catch {
+        // Ignore send errors
+      }
+    }
+  }
+
+  public broadcastFrameToFocusedClients(cameraId: string, payload: any): void {
+    this.latestFrameByCamera.set(cameraId, payload);
+    const message = JSON.stringify(payload);
+    for (const ws of this.clientSockets) {
+      if (ws.readyState === WebSocket.OPEN && (this.clientFocusCamera.get(ws) ?? 'cam-01') === cameraId) {
+        try {
+          ws.send(message);
+        } catch (err) {
+          console.error('[WS Manager] Frame send error to client:', err);
+        }
+      }
+    }
+  }
+
+  public broadcastTelemetryToClients(cameraId: string, telemetry: any): void {
+    this.broadcastToClients({
+      type: 'camera_telemetry',
+      cameraId,
+      telemetry,
+      timestamp: Date.now(),
+    });
   }
 
   public broadcastToClients(payload: any): void {

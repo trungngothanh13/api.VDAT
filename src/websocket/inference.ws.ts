@@ -57,8 +57,11 @@ export function handleInferenceConnection(ws: WebSocket): void {
         }
 
         case 'frame': {
-          // Relay frame and telemetry directly to web clients
-          wsManager.broadcastToClients({
+          // Always send lightweight telemetry for all cameras (for Multi-Source Wall status)
+          wsManager.broadcastTelemetryToClients(message.cameraId, message.telemetry);
+
+          // Send heavy AI-annotated frame only to clients currently focused on this camera
+          wsManager.broadcastFrameToFocusedClients(message.cameraId, {
             type: 'live_frame',
             cameraId: message.cameraId,
             telemetry: message.telemetry,

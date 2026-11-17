@@ -24,6 +24,12 @@ export function handleClientConnection(ws: WebSocket): void {
           break;
         }
 
+        case 'watch_camera': {
+          const cameraId = msg.cameraId || 'cam-01';
+          wsManager.setClientFocusCamera(ws, cameraId);
+          break;
+        }
+
         case 'source_init': {
           const cameraId = msg.cameraId || 'cam-01';
           wsManager.registerWebSource(cameraId, ws);

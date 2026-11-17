@@ -8,7 +8,36 @@ import { prisma } from './config/prisma.js';
 import { handleInferenceConnection } from './websocket/inference.ws.js';
 import { handleClientConnection } from './websocket/client.ws.js';
 
+async function ensureDefaultCameras() {
+  const defaults = [
+    { id: 'cam-01', name: 'Camera 01 (Primary)', location: 'Intersection 1' },
+    { id: 'cam-02', name: 'Camera 02', location: 'Intersection 2' },
+    { id: 'cam-03', name: 'Camera 03', location: 'Intersection 3' },
+  ];
+  for (const cam of defaults) {
+    await prisma.camera.upsert({
+      where: { id: cam.id },
+      update: {},
+      create: {
+        id: cam.id,
+        name: cam.name,
+        location: cam.location,
+        isActive: false,
+        config: {
+          create: {
+            lanes: [],
+            intersection: [],
+            lightBox: [],
+            version: 1,
+          },
+        },
+      },
+    });
+  }
+}
+
 async function bootstrap() {
+  await ensureDefaultCameras();
   const app = createApp();
   const server = http.createServer(app);
 

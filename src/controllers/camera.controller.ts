@@ -52,6 +52,50 @@ export async function getCamera(req: Request, res: Response, next: NextFunction)
   }
 }
 
+const createCameraSchema = z.object({
+  id: z
+    .string()
+    .trim()
+    .min(2)
+    .max(32)
+    .regex(/^[a-zA-Z0-9_-]+$/, 'Camera ID may only contain letters, numbers, dashes, and underscores'),
+  name: z.string().trim().min(1).max(80),
+  location: z.string().trim().min(1).max(120).optional().default('Intersection'),
+});
+
+export async function createCamera(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const data = createCameraSchema.parse(req.body);
+    const existing = await prisma.camera.findUnique({ where: { id: data.id } });
+    if (existing) {
+      res.status(409).json({ error: `Camera '${data.id}' already exists` });
+      return;
+    }
+
+    const camera = await prisma.camera.create({
+      data: {
+        id: data.id,
+        name: data.name,
+        location: data.location,
+        isActive: false,
+        config: {
+          create: {
+            lanes: [],
+            intersection: [],
+            lightBox: [],
+            version: 1,
+          },
+        },
+      },
+      include: { config: true },
+    });
+
+    res.status(201).json(camera);
+  } catch (err) {
+    next(err);
+  }
+}
+
 const updateZoneSchema = z.object({
   lanes: z.array(z.any()),
   intersection: z.array(z.any()),

@@ -274,58 +274,9 @@ async function handleEvidenceStreamOrDownload(
       }
     }
 
-    // 3. Fallback: If historical violation clip from local source video is requested while AI engine is offline,
-    // extract the 6-second H.264 clip around the violation frame on-the-fly and cache it in uploads/evidence
-    const frameMatch = sanitizedFilename.match(/_f(\d+)\.mp4$/i);
-    const fallbackSourceVideo = path.resolve(
-      process.cwd(),
-      '../VehicleDetectionAndTrackingModule/test_1.mp4'
-    );
-
-    if (frameMatch && fs.existsSync(fallbackSourceVideo)) {
-      const frameNum = parseInt(frameMatch[1], 10);
-      const sourceTotalFrames = 10852;
-      const effectiveFrame = frameNum % sourceTotalFrames;
-      const centerSec = effectiveFrame / 30.0;
-      const startSec = Math.max(0, centerSec - 3.0);
-
-      try {
-        await execFileAsync('ffmpeg', [
-          '-y',
-          '-loglevel',
-          'error',
-          '-ss',
-          startSec.toFixed(2),
-          '-i',
-          fallbackSourceVideo,
-          '-t',
-          '6.0',
-          '-c:v',
-          'libx264',
-          '-preset',
-          'ultrafast',
-          '-crf',
-          '23',
-          '-pix_fmt',
-          'yuv420p',
-          '-movflags',
-          '+faststart',
-          '-an',
-          localFilePath,
-        ]);
-
-        if (fs.existsSync(localFilePath)) {
-          streamOrDownloadVideo(req, res, localFilePath, sanitizedFilename);
-          return;
-        }
-      } catch (extractErr: any) {
-        console.warn(`[Evidence Stream] Local clip extraction fallback failed: ${extractErr.message}`);
-      }
-    }
-
     res.status(404).json({
       error: 'Evidence clip not found',
-      detail: `File '${sanitizedFilename}' could not be retrieved from AI engine.`,
+      detail: `File '${sanitizedFilename}' could not be retrieved from AI engine for camera '${cameraId}'.`,
     });
   } catch (err) {
     next(err);
