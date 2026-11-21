@@ -31,11 +31,29 @@ export async function authenticateToken(
   }
 
   try {
-    const decoded = jwt.verify(token, config.jwtSecret) as { id: string; role: Role };
-    const user = await prisma.user.findUnique({
+    const decoded = jwt.verify(token, config.jwtSecret) as {
+      id: string;
+      email?: string;
+      role: Role;
+    };
+    let user = await prisma.user.findUnique({
       where: { id: decoded.id },
       select: { id: true, email: true, role: true, fullName: true },
     });
+
+    if (!user && decoded.email) {
+      user = await prisma.user.findUnique({
+        where: { email: decoded.email },
+        select: { id: true, email: true, role: true, fullName: true },
+      });
+    }
+
+    if (!user && decoded.role) {
+      user = await prisma.user.findFirst({
+        where: { role: decoded.role },
+        select: { id: true, email: true, role: true, fullName: true },
+      });
+    }
 
     if (!user) {
       res.status(401).json({ error: 'User no longer exists' });

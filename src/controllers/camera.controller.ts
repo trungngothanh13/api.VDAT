@@ -210,6 +210,18 @@ export async function updateZoneConfig(req: Request, res: Response, next: NextFu
       });
     }
 
+    console.log(
+      `💾 [ZoneProfile] Saved profile '${profile.sourceKey}' (v${profile.version}, crossingMode=${profile.crossingMode}) for camera '${id}' (syncedWithAI=${sent})`
+    );
+
+    wsManager.broadcastToClients({
+      type: 'camera_profile_switched',
+      cameraId: id,
+      sourceKey: profile.sourceKey,
+      config: profile,
+      timestamp: Date.now(),
+    });
+
     res.json({
       config: profile,
       syncedWithAI: sent,

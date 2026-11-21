@@ -31,7 +31,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     }
 
     const token = jwt.sign(
-      { id: user.id, role: user.role },
+      { id: user.id, email: user.email, role: user.role },
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn as any }
     );
