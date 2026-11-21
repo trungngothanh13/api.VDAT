@@ -74,6 +74,9 @@ export class WebSocketManager {
   public sendToInference(cameraId: string, payload: any): boolean {
     const ws = this.inferenceSockets.get(cameraId);
     if (ws && ws.readyState === WebSocket.OPEN) {
+      if (payload?.type === 'ingest_frame' && ws.bufferedAmount > 512 * 1024) {
+        return false;
+      }
       ws.send(JSON.stringify(payload));
       return true;
     }
