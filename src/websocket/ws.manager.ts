@@ -1,17 +1,25 @@
 import { WebSocket } from 'ws';
 import { EventEmitter } from 'events';
+import { encodeBinaryFrame } from './binary-frame.js';
 
 export const evidenceEvents = new EventEmitter();
 evidenceEvents.setMaxListeners(100);
 
-const MAX_IN_FLIGHT_FRAMES = 2;
-const IN_FLIGHT_STALE_MS = 1500;
-const MAX_INFERENCE_BUFFERED_BYTES = 256 * 1024;
+// Sized for ~300ms international RTT (BDP: 15 FPS * 0.30s = 4.5 -> 8 frames keeps 15 FPS smooth with <180KB in flight)
+const MAX_IN_FLIGHT_FRAMES = 8;
+const IN_FLIGHT_STALE_MS = 2500;
+const MAX_INFERENCE_BUFFERED_BYTES = 512 * 1024;
 const MAX_CLIENT_BUFFERED_BYTES = 512 * 1024;
 
 interface InferenceFlowState {
-  inFlight: number;
+  nextSeq: number;
+  ackedSeq: number;
   lastSentAt: number;
+}
+
+export interface QueuedInferenceFrame {
+  header: Record<string, any>;
+  payload?: Buffer;
 }
 
 export class WebSocketManager {
@@ -21,7 +29,7 @@ export class WebSocketManager {
   private inferenceSockets: Map<string, WebSocket> = new Map();
   private inferenceModes: Map<string, string> = new Map();
   private inferenceFlow: Map<string, InferenceFlowState> = new Map();
-  private latestPendingFrameByCamera: Map<string, Buffer | string> = new Map();
+  private latestPendingFrameByCamera: Map<string, QueuedInferenceFrame> = new Map();
   private inferenceSendImage: Map<string, boolean> = new Map();
 
   // Active web-fed camera transmitters (video file or laptop webcam): Map<cameraId, WebSocket>
@@ -45,7 +53,7 @@ export class WebSocketManager {
   public registerInference(cameraId: string, ws: WebSocket, ingestMode: string = 'local'): void {
     this.inferenceSockets.set(cameraId, ws);
     this.inferenceModes.set(cameraId, ingestMode);
-    this.inferenceFlow.set(cameraId, { inFlight: 0, lastSentAt: 0 });
+    this.inferenceFlow.set(cameraId, { nextSeq: 0, ackedSeq: 0, lastSentAt: 0 });
     this.latestPendingFrameByCamera.delete(cameraId);
     this.inferenceSendImage.delete(cameraId);
     console.log(`[WS Manager] AI Inference connected for camera: ${cameraId} (mode: ${ingestMode})`);
@@ -103,12 +111,31 @@ export class WebSocketManager {
     return false;
   }
 
+  private sendSequencedFrame(
+    ws: WebSocket,
+    flow: InferenceFlowState,
+    frame: QueuedInferenceFrame
+  ): boolean {
+    const seq = flow.nextSeq + 1;
+    const wireData: Buffer | string = frame.payload
+      ? encodeBinaryFrame({ ...frame.header, seq }, frame.payload)
+      : JSON.stringify({ ...frame.header, seq });
+    try {
+      ws.send(wireData);
+      flow.nextSeq = seq;
+      flow.lastSentAt = Date.now();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /**
-   * Credit-based flow control across SSH tunnels: allows at most MAX_IN_FLIGHT_FRAMES
-   * unacknowledged frames per camera in the tunnel at any moment, keeping only the
-   * newest pending frame instead of letting OpenSSH buffer megabytes of stale video.
+   * Monotonic sequence-number sliding window across SSH tunnels: allows at most
+   * MAX_IN_FLIGHT_FRAMES unacknowledged frames per camera (BDP-matched for ~300ms RTT),
+   * keeping only the newest pending frame instead of letting OpenSSH buffer megabytes.
    */
-  public enqueueFrameForInference(cameraId: string, frameData: Buffer | string): boolean {
+  public enqueueFrameForInference(cameraId: string, frame: QueuedInferenceFrame): boolean {
     const ws = this.inferenceSockets.get(cameraId);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return false;
@@ -117,56 +144,49 @@ export class WebSocketManager {
     const now = Date.now();
     let flow = this.inferenceFlow.get(cameraId);
     if (!flow) {
-      flow = { inFlight: 0, lastSentAt: 0 };
+      flow = { nextSeq: 0, ackedSeq: 0, lastSentAt: 0 };
       this.inferenceFlow.set(cameraId, flow);
     }
 
-    if (flow.inFlight > 0 && now - flow.lastSentAt > IN_FLIGHT_STALE_MS) {
-      flow.inFlight = 0;
+    let inFlight = flow.nextSeq - flow.ackedSeq;
+    if (inFlight > 0 && now - flow.lastSentAt > IN_FLIGHT_STALE_MS) {
+      flow.ackedSeq = flow.nextSeq;
+      inFlight = 0;
     }
 
-    if (flow.inFlight < MAX_IN_FLIGHT_FRAMES && ws.bufferedAmount <= MAX_INFERENCE_BUFFERED_BYTES) {
-      try {
-        ws.send(frameData);
-        flow.inFlight += 1;
-        flow.lastSentAt = now;
-        return true;
-      } catch {
-        return false;
-      }
+    if (inFlight < MAX_IN_FLIGHT_FRAMES && ws.bufferedAmount <= MAX_INFERENCE_BUFFERED_BYTES) {
+      return this.sendSequencedFrame(ws, flow, frame);
     }
 
-    // Tunnel/AI is currently at capacity for this camera: replace any older queued frame with newest
-    this.latestPendingFrameByCamera.set(cameraId, frameData);
+    // Tunnel/AI window is full for this camera: keep only the freshest pending frame
+    this.latestPendingFrameByCamera.set(cameraId, frame);
     return false;
   }
 
-  public ackInferenceFrame(cameraId: string, ackedCount: number = 1): void {
+  public ackInferenceFrame(cameraId: string, ackSeq?: number, ackedCount: number = 1): void {
     const ws = this.inferenceSockets.get(cameraId);
     let flow = this.inferenceFlow.get(cameraId);
     if (!flow) {
-      flow = { inFlight: 0, lastSentAt: 0 };
+      flow = { nextSeq: 0, ackedSeq: 0, lastSentAt: 0 };
       this.inferenceFlow.set(cameraId, flow);
     }
 
-    flow.inFlight = Math.max(0, flow.inFlight - Math.max(1, ackedCount));
+    if (typeof ackSeq === 'number' && ackSeq > 0) {
+      flow.ackedSeq = Math.min(flow.nextSeq, Math.max(flow.ackedSeq, ackSeq));
+    } else {
+      flow.ackedSeq = Math.min(flow.nextSeq, flow.ackedSeq + Math.max(1, ackedCount));
+    }
 
     const pending = this.latestPendingFrameByCamera.get(cameraId);
     if (
       pending &&
       ws &&
       ws.readyState === WebSocket.OPEN &&
-      flow.inFlight < MAX_IN_FLIGHT_FRAMES &&
+      flow.nextSeq - flow.ackedSeq < MAX_IN_FLIGHT_FRAMES &&
       ws.bufferedAmount <= MAX_INFERENCE_BUFFERED_BYTES
     ) {
       this.latestPendingFrameByCamera.delete(cameraId);
-      try {
-        ws.send(pending);
-        flow.inFlight += 1;
-        flow.lastSentAt = Date.now();
-      } catch {
-        // Ignore transient send error
-      }
+      this.sendSequencedFrame(ws, flow, pending);
     }
   }
 
@@ -174,7 +194,7 @@ export class WebSocketManager {
     this.latestPendingFrameByCamera.delete(cameraId);
     const flow = this.inferenceFlow.get(cameraId);
     if (flow) {
-      flow.inFlight = 0;
+      flow.ackedSeq = flow.nextSeq;
     }
   }
 

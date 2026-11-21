@@ -30,8 +30,9 @@ export function handleInferenceConnection(ws: WebSocket): void {
 
         if (parsed.header.type === 'frame') {
           const cameraId = parsed.header.cameraId || boundCameraId || 'cam-01';
+          const ackSeq = typeof parsed.header.ackSeq === 'number' ? parsed.header.ackSeq : undefined;
           const ackedFrames = typeof parsed.header.ackedFrames === 'number' ? parsed.header.ackedFrames : 1;
-          wsManager.ackInferenceFrame(cameraId, ackedFrames);
+          wsManager.ackInferenceFrame(cameraId, ackSeq, ackedFrames);
           if (parsed.header.telemetry) {
             wsManager.broadcastTelemetryToClients(cameraId, parsed.header.telemetry);
           }
@@ -92,8 +93,9 @@ export function handleInferenceConnection(ws: WebSocket): void {
         }
 
         case 'frame': {
+          const ackSeq = typeof message.ackSeq === 'number' ? message.ackSeq : undefined;
           const ackedFrames = typeof message.ackedFrames === 'number' ? message.ackedFrames : 1;
-          wsManager.ackInferenceFrame(message.cameraId, ackedFrames);
+          wsManager.ackInferenceFrame(message.cameraId, ackSeq, ackedFrames);
 
           // Always send lightweight telemetry for all cameras (for Multi-Source Wall status)
           wsManager.broadcastTelemetryToClients(message.cameraId, message.telemetry);
@@ -114,7 +116,12 @@ export function handleInferenceConnection(ws: WebSocket): void {
         case 'frame_ack': {
           const cameraId = message.cameraId || boundCameraId;
           if (cameraId) {
-            wsManager.ackInferenceFrame(cameraId, typeof message.count === 'number' ? message.count : 1);
+            const ackSeq = typeof message.ackSeq === 'number' ? message.ackSeq : undefined;
+            wsManager.ackInferenceFrame(
+              cameraId,
+              ackSeq,
+              typeof message.count === 'number' ? message.count : 1
+            );
           }
           break;
         }

@@ -31,7 +31,10 @@ export function handleClientConnection(ws: WebSocket): void {
           const cameraId = parsed.header.cameraId || 'cam-01';
           if (wsManager.hasActiveInference(cameraId)) {
             wsManager.setInferenceMode(cameraId, 'ws');
-            wsManager.enqueueFrameForInference(cameraId, buf);
+            wsManager.enqueueFrameForInference(cameraId, {
+              header: parsed.header,
+              payload: parsed.payload,
+            });
           }
         }
         return;
@@ -153,17 +156,16 @@ export function handleClientConnection(ws: WebSocket): void {
           // Never echo raw unannotated browser frames back as live_frame!
           if (wsManager.hasActiveInference(cameraId)) {
             wsManager.setInferenceMode(cameraId, 'ws');
-            wsManager.enqueueFrameForInference(
-              cameraId,
-              JSON.stringify({
+            wsManager.enqueueFrameForInference(cameraId, {
+              header: {
                 type: 'ingest_frame',
                 cameraId,
                 sourceType: msg.sourceType || 'web_stream',
                 frameNumber: msg.frameNumber || 0,
                 image,
                 timestamp: msg.timestamp || Date.now(),
-              })
-            );
+              },
+            });
           }
           break;
         }
