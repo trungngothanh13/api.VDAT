@@ -15,6 +15,7 @@ async function main() {
     where: { email: 'admin@vdat.local' },
     update: {},
     create: {
+      id: '00000000-0000-4000-8000-000000000001',
       email: 'admin@vdat.local',
       fullName: 'System Administrator',
       passwordHash: adminPassword,
@@ -26,6 +27,7 @@ async function main() {
     where: { email: 'officer@vdat.local' },
     update: {},
     create: {
+      id: '00000000-0000-4000-8000-000000000002',
       email: 'officer@vdat.local',
       fullName: 'Traffic Officer',
       passwordHash: officerPassword,

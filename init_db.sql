@@ -38,7 +38,7 @@ CREATE TYPE "ViolationStatus" AS ENUM ('PENDING_REVIEW', 'CONFIRMED', 'DISMISSED
 
 -- 1. Users Table
 CREATE TABLE "users" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
     "email" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "fullName" TEXT NOT NULL,
@@ -51,7 +51,7 @@ CREATE TABLE "users" (
 
 -- 2. Zone Profiles Table (Keyed by Video / Camera Source: sourceKey)
 CREATE TABLE "zone_profiles" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
     "sourceKey" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "lanes" JSONB NOT NULL,
@@ -86,7 +86,7 @@ CREATE TABLE "cameras" (
 
 -- 4. Violations Table
 CREATE TABLE "violations" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
     "cameraId" TEXT NOT NULL,
     "zoneProfileId" TEXT,
     "sourceKey" TEXT,
@@ -165,8 +165,14 @@ END
 $$;
 
 -- -----------------------------------------------------------------------------
--- PART 7: Default Camera Slots (cam-01 through cam-06)
+-- PART 7: Default Users & Camera Slots (Self-Contained 1-Run Seed)
 -- -----------------------------------------------------------------------------
+
+-- Default accounts: admin@vdat.local / admin123, officer@vdat.local / police123
+INSERT INTO "users" ("id", "email", "passwordHash", "fullName", "role") VALUES
+    ('00000000-0000-4000-8000-000000000001', 'admin@vdat.local', '$2a$10$bjCMHfcVW9ukTBi4J/5AJOYNeIN2a9IRouUQINoPYzjASC3Fj1SAG', 'System Administrator', 'ADMIN'),
+    ('00000000-0000-4000-8000-000000000002', 'officer@vdat.local', '$2a$10$BJ5bCr4K59nuu43C/4HIoufBQOAtIR4sro5FvygtrmpJr4NDtKMX.', 'Traffic Officer', 'POLICE')
+ON CONFLICT ("email") DO NOTHING;
 
 INSERT INTO "cameras" ("id", "name", "location", "isActive") VALUES
     ('cam-01', 'Camera 01 (Primary)', 'Intersection 1', false),
@@ -180,5 +186,6 @@ ON CONFLICT ("id") DO NOTHING;
 -- -----------------------------------------------------------------------------
 -- Connection string for .env:
 -- DATABASE_URL="postgresql://vdat_user:vdat_secret@localhost:5432/vdat_db?schema=public"
--- After running this script, re-run `npm run prisma:seed` to populate default accounts.
+-- This script is self-contained: running it drops/rebuilds all tables and
+-- seeds the default admin/officer users and 6 camera slots in 1 run.
 -- -----------------------------------------------------------------------------
