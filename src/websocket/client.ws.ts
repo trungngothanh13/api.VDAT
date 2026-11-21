@@ -32,25 +32,18 @@ export function handleClientConnection(ws: WebSocket): void {
 
         case 'source_init': {
           const cameraId = msg.cameraId || 'cam-01';
+          const sourceKey =
+            (typeof msg.sourceKey === 'string' && msg.sourceKey.trim()) ||
+            (typeof msg.label === 'string' && msg.label.trim()
+              ? `file:${msg.label.trim()}`
+              : `camera:${cameraId}`);
+
           wsManager.registerWebSource(cameraId, ws);
           wsManager.setInferenceMode(cameraId, 'ws');
 
-          if (wsManager.hasActiveInference(cameraId)) {
-            console.log(
-              `[Client WS] Web source (${msg.label || msg.sourceType}) initialized -> routing to connected AI Engine (${cameraId})`
-            );
-            wsManager.sendToInference(cameraId, {
-              type: 'switch_source',
-              cameraId,
-              sourceType: 'web_stream',
-              sourceValue: msg.label || msg.sourceType || 'web_stream',
-              loop: true,
-            });
-          } else {
-            console.warn(
-              `[Client WS] Web source (${msg.label || msg.sourceType}) initialized for ${cameraId}, but NO Python AI Engine is connected to /ws/inference`
-            );
-          }
+          const profile = await prisma.zoneProfile
+            .findUnique({ where: { sourceKey } })
+            .catch(() => null);
 
           await prisma.camera
             .upsert({
@@ -58,10 +51,13 @@ export function handleClientConnection(ws: WebSocket): void {
               update: {
                 isActive: true,
                 lastSeenAt: new Date(),
+                activeSourceKey: sourceKey,
+                activeZoneProfileId: profile?.id ?? null,
                 metadata: {
                   sourceType: msg.sourceType || 'web_stream',
+                  sourceKey,
                   label: msg.label || 'Web Camera Stream',
-                  fps: msg.fps || 30,
+                  fps: msg.fps || 15,
                   width: msg.width || 854,
                   height: msg.height || 480,
                 },
@@ -72,15 +68,58 @@ export function handleClientConnection(ws: WebSocket): void {
                 location: 'Web Stream Transmitter',
                 isActive: true,
                 lastSeenAt: new Date(),
+                activeSourceKey: sourceKey,
+                activeZoneProfileId: profile?.id ?? null,
                 metadata: {
                   sourceType: msg.sourceType || 'web_stream',
-                  fps: msg.fps || 30,
+                  sourceKey,
+                  fps: msg.fps || 15,
                   width: msg.width || 854,
                   height: msg.height || 480,
                 },
               },
             })
             .catch(() => {});
+
+          if (wsManager.hasActiveInference(cameraId)) {
+            console.log(
+              `[Client WS] Web source (${sourceKey}) initialized -> routing to connected AI Engine (${cameraId})`
+            );
+            wsManager.sendToInference(cameraId, {
+              type: 'switch_source',
+              cameraId,
+              sourceType: 'web_stream',
+              sourceValue: msg.label || sourceKey,
+              sourceKey,
+              loop: true,
+            });
+            // Auto-apply saved ZoneProfile or reset stale zones when switching sources
+            wsManager.sendToInference(cameraId, {
+              type: 'zone_update',
+              cameraId,
+              zones: profile ?? {
+                sourceKey,
+                lanes: [],
+                intersection: [],
+                exitZones: [],
+                lightBox: [],
+                crossingMode: false,
+                clearanceSeconds: 3.0,
+              },
+            });
+          } else {
+            console.warn(
+              `[Client WS] Web source (${sourceKey}) initialized for ${cameraId}, but NO Python AI Engine is connected to /ws/inference`
+            );
+          }
+
+          wsManager.broadcastToClients({
+            type: 'camera_profile_switched',
+            cameraId,
+            sourceKey,
+            config: profile ?? null,
+            timestamp: Date.now(),
+          });
           break;
         }
 

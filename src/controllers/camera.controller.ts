@@ -7,7 +7,7 @@ export async function listCameras(_req: Request, res: Response, next: NextFuncti
   try {
     const cameras = await prisma.camera.findMany({
       include: {
-        config: true,
+        activeZoneProfile: true,
         _count: {
           select: { violations: true },
         },
@@ -17,13 +17,32 @@ export async function listCameras(_req: Request, res: Response, next: NextFuncti
 
     const activeCameras = new Set(wsManager.getActiveCameras());
 
-    const result = cameras.map((cam) => ({
-      ...cam,
-      isLive: activeCameras.has(cam.id),
-      violationCount: cam._count.violations,
-    }));
+    const result = cameras.map((cam) => {
+      const { activeZoneProfile, _count, ...rest } = cam;
+      return {
+        ...rest,
+        config: activeZoneProfile,
+        isLive: activeCameras.has(cam.id),
+        violationCount: _count.violations,
+      };
+    });
 
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listZoneProfiles(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const profiles = await prisma.zoneProfile.findMany({
+      orderBy: { updatedAt: 'desc' },
+    });
+    res.json(profiles);
   } catch (err) {
     next(err);
   }
@@ -34,7 +53,7 @@ export async function getCamera(req: Request, res: Response, next: NextFunction)
     const { id } = req.params;
     const camera = await prisma.camera.findUnique({
       where: { id },
-      include: { config: true },
+      include: { activeZoneProfile: true },
     });
 
     if (!camera) {
@@ -43,8 +62,10 @@ export async function getCamera(req: Request, res: Response, next: NextFunction)
     }
 
     const activeCameras = new Set(wsManager.getActiveCameras());
+    const { activeZoneProfile, ...rest } = camera;
     res.json({
-      ...camera,
+      ...rest,
+      config: activeZoneProfile,
       isLive: activeCameras.has(camera.id),
     });
   } catch (err) {
@@ -78,28 +99,30 @@ export async function createCamera(req: Request, res: Response, next: NextFuncti
         name: data.name,
         location: data.location,
         isActive: false,
-        config: {
-          create: {
-            lanes: [],
-            intersection: [],
-            lightBox: [],
-            version: 1,
-          },
-        },
+        activeZoneProfileId: null,
       },
-      include: { config: true },
+      include: { activeZoneProfile: true },
     });
 
-    res.status(201).json(camera);
+    const { activeZoneProfile, ...rest } = camera;
+    res.status(201).json({
+      ...rest,
+      config: activeZoneProfile,
+    });
   } catch (err) {
     next(err);
   }
 }
 
 const updateZoneSchema = z.object({
+  sourceKey: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1).optional(),
   lanes: z.array(z.any()),
   intersection: z.array(z.any()),
+  exitZones: z.array(z.any()).optional().default([]),
   lightBox: z.any().optional(),
+  crossingMode: z.boolean().optional().default(false),
+  clearanceSeconds: z.number().min(0).max(15).optional().default(3.0),
 });
 
 export async function updateZoneConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -107,36 +130,92 @@ export async function updateZoneConfig(req: Request, res: Response, next: NextFu
     const { id } = req.params;
     const data = updateZoneSchema.parse(req.body);
 
-    const config = await prisma.cameraConfig.upsert({
-      where: { cameraId: id },
+    const existingCam = await prisma.camera.findUnique({
+      where: { id },
+      select: { id: true, name: true, activeSourceKey: true },
+    });
+
+    const effectiveSourceKey =
+      data.sourceKey || existingCam?.activeSourceKey || `camera:${id}`;
+    const profileName =
+      data.name ||
+      effectiveSourceKey.replace(/^(file|webcam|camera):/, '') ||
+      existingCam?.name ||
+      id;
+
+    const profile = await prisma.zoneProfile.upsert({
+      where: { sourceKey: effectiveSourceKey },
       update: {
+        name: profileName,
         lanes: data.lanes,
         intersection: data.intersection,
-        lightBox: data.lightBox || null,
+        exitZones: data.exitZones,
+        lightBox: data.lightBox || [],
+        crossingMode: data.crossingMode,
+        clearanceSeconds: data.clearanceSeconds,
         version: { increment: 1 },
       },
       create: {
-        cameraId: id,
+        sourceKey: effectiveSourceKey,
+        name: profileName,
         lanes: data.lanes,
         intersection: data.intersection,
-        lightBox: data.lightBox || null,
+        exitZones: data.exitZones,
+        lightBox: data.lightBox || [],
+        crossingMode: data.crossingMode,
+        clearanceSeconds: data.clearanceSeconds,
         version: 1,
       },
     });
 
-    // Notify connected AI Engine on ThunderCompute about updated zones
+    await prisma.camera.upsert({
+      where: { id },
+      update: {
+        activeSourceKey: effectiveSourceKey,
+        activeZoneProfileId: profile.id,
+      },
+      create: {
+        id,
+        name: existingCam?.name || `Camera ${id}`,
+        location: 'Intersection',
+        isActive: false,
+        activeSourceKey: effectiveSourceKey,
+        activeZoneProfileId: profile.id,
+      },
+    });
+
+    // Sync any other cameras currently running the exact same video sourceKey
+    const siblingCameras = await prisma.camera.findMany({
+      where: { activeSourceKey: effectiveSourceKey, id: { not: id } },
+      select: { id: true },
+    });
+    if (siblingCameras.length > 0) {
+      await prisma.camera.updateMany({
+        where: { activeSourceKey: effectiveSourceKey, id: { not: id } },
+        data: { activeZoneProfileId: profile.id },
+      });
+    }
+
     const sent = wsManager.sendToInference(id, {
       type: 'zone_update',
       cameraId: id,
-      zones: config,
+      zones: profile,
     });
 
+    for (const sib of siblingCameras) {
+      wsManager.sendToInference(sib.id, {
+        type: 'zone_update',
+        cameraId: sib.id,
+        zones: profile,
+      });
+    }
+
     res.json({
-      config,
+      config: profile,
       syncedWithAI: sent,
       message: sent
-        ? 'Zone configuration updated and synced with AI engine.'
-        : 'Zone configuration updated. (AI engine not currently connected, will sync on connect)',
+        ? `ZoneProfile '${profile.sourceKey}' saved and synced to AI engine.`
+        : `ZoneProfile '${profile.sourceKey}' saved. (AI engine offline, will sync on connect)`,
     });
   } catch (err) {
     next(err);

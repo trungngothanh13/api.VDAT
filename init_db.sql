@@ -1,42 +1,29 @@
 -- =============================================================================
--- VDAT Full Database Initialization & DDL Schema Script (PostgreSQL)
+-- VDAT Full Database Reset & Schema Script (PostgreSQL)
 -- =============================================================================
--- Run as postgres superuser:
---   psql -U postgres -f init_db.sql
+-- Drops all existing VDAT tables/enums and recreates the ZoneProfile-based
+-- schema from scratch.
+--
+-- Usage on existing vdat_db:
+--   psql -U vdat_user -d vdat_db -f init_db.sql
+--
+-- First-time database/role creation (as postgres superuser, if needed):
+--   CREATE ROLE vdat_user WITH LOGIN PASSWORD 'vdat_secret';
+--   CREATE DATABASE vdat_db OWNER vdat_user;
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- PART 1: Database & Role Creation
+-- PART 1: Drop Every Existing Table & Enum Type
 -- -----------------------------------------------------------------------------
 
--- Refresh collation versions if needed
-ALTER DATABASE template1 REFRESH COLLATION VERSION;
-ALTER DATABASE postgres REFRESH COLLATION VERSION;
+DROP TABLE IF EXISTS "violations" CASCADE;
+DROP TABLE IF EXISTS "camera_configs" CASCADE;
+DROP TABLE IF EXISTS "cameras" CASCADE;
+DROP TABLE IF EXISTS "zone_profiles" CASCADE;
+DROP TABLE IF EXISTS "users" CASCADE;
 
--- Create dedicated database
-CREATE DATABASE vdat_db;
-
--- Create application user
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vdat_user') THEN
-        CREATE ROLE vdat_user WITH LOGIN PASSWORD 'vdat_secret';
-    END IF;
-END
-$$;
-
--- Set database ownership
-ALTER DATABASE vdat_db OWNER TO vdat_user;
-
--- Connect to the new database
-\c vdat_db
-
--- Grant schema privileges
-GRANT ALL ON SCHEMA public TO vdat_user;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO vdat_user;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO vdat_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO vdat_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO vdat_user;
+DROP TYPE IF EXISTS "ViolationStatus" CASCADE;
+DROP TYPE IF EXISTS "Role" CASCADE;
 
 -- -----------------------------------------------------------------------------
 -- PART 2: Custom Enum Types
@@ -57,43 +44,52 @@ CREATE TABLE "users" (
     "fullName" TEXT NOT NULL,
     "role" "Role" NOT NULL DEFAULT 'POLICE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
--- 2. Cameras Table
+-- 2. Zone Profiles Table (Keyed by Video / Camera Source: sourceKey)
+CREATE TABLE "zone_profiles" (
+    "id" TEXT NOT NULL,
+    "sourceKey" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "lanes" JSONB NOT NULL,
+    "intersection" JSONB NOT NULL,
+    "exitZones" JSONB NOT NULL DEFAULT '[]'::jsonb,
+    "lightBox" JSONB,
+    "crossingMode" BOOLEAN NOT NULL DEFAULT false,
+    "clearanceSeconds" DOUBLE PRECISION NOT NULL DEFAULT 3.0,
+    "version" INTEGER NOT NULL DEFAULT 1,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "zone_profiles_pkey" PRIMARY KEY ("id")
+);
+
+-- 3. Cameras Table (6+ Monitoring Channels)
 CREATE TABLE "cameras" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "location" TEXT NOT NULL,
     "rtspUrl" TEXT,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "isActive" BOOLEAN NOT NULL DEFAULT false,
     "lastSeenAt" TIMESTAMP(3),
+    "activeSourceKey" TEXT,
+    "activeZoneProfileId" TEXT,
     "metadata" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "cameras_pkey" PRIMARY KEY ("id")
-);
-
--- 3. Camera Configurations Table (Zone Polygons & Traffic Lights)
-CREATE TABLE "camera_configs" (
-    "id" TEXT NOT NULL,
-    "cameraId" TEXT NOT NULL,
-    "lanes" JSONB NOT NULL,
-    "intersection" JSONB NOT NULL,
-    "lightBox" JSONB,
-    "version" INTEGER NOT NULL DEFAULT 1,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "camera_configs_pkey" PRIMARY KEY ("id")
 );
 
 -- 4. Violations Table
 CREATE TABLE "violations" (
     "id" TEXT NOT NULL,
     "cameraId" TEXT NOT NULL,
+    "zoneProfileId" TEXT,
+    "sourceKey" TEXT,
     "trackId" INTEGER NOT NULL,
     "vehicleClass" TEXT NOT NULL,
     "classId" INTEGER NOT NULL,
@@ -109,7 +105,7 @@ CREATE TABLE "violations" (
     "reviewedAt" TIMESTAMP(3),
     "notes" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "violations_pkey" PRIMARY KEY ("id")
 );
@@ -119,7 +115,7 @@ CREATE TABLE "violations" (
 -- -----------------------------------------------------------------------------
 
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
-CREATE UNIQUE INDEX "camera_configs_cameraId_key" ON "camera_configs"("cameraId");
+CREATE UNIQUE INDEX "zone_profiles_sourceKey_key" ON "zone_profiles"("sourceKey");
 
 CREATE INDEX "violations_cameraId_idx" ON "violations"("cameraId");
 CREATE INDEX "violations_status_idx" ON "violations"("status");
@@ -129,10 +125,10 @@ CREATE INDEX "violations_createdAt_idx" ON "violations"("createdAt");
 -- PART 5: Foreign Key Constraints
 -- -----------------------------------------------------------------------------
 
-ALTER TABLE "camera_configs"
-    ADD CONSTRAINT "camera_configs_cameraId_fkey"
-    FOREIGN KEY ("cameraId") REFERENCES "cameras"("id")
-    ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "cameras"
+    ADD CONSTRAINT "cameras_activeZoneProfileId_fkey"
+    FOREIGN KEY ("activeZoneProfileId") REFERENCES "zone_profiles"("id")
+    ON DELETE SET NULL ON UPDATE CASCADE;
 
 ALTER TABLE "violations"
     ADD CONSTRAINT "violations_cameraId_fkey"
@@ -140,15 +136,49 @@ ALTER TABLE "violations"
     ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE "violations"
+    ADD CONSTRAINT "violations_zoneProfileId_fkey"
+    FOREIGN KEY ("zoneProfileId") REFERENCES "zone_profiles"("id")
+    ON DELETE SET NULL ON UPDATE CASCADE;
+
+ALTER TABLE "violations"
     ADD CONSTRAINT "violations_reviewedById_fkey"
     FOREIGN KEY ("reviewedById") REFERENCES "users"("id")
     ON DELETE SET NULL ON UPDATE CASCADE;
 
--- Grant permissions on newly created tables to application user
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO vdat_user;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO vdat_user;
+-- -----------------------------------------------------------------------------
+-- PART 6: Ownership & Permissions (Safe when run as postgres or vdat_user)
+-- -----------------------------------------------------------------------------
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vdat_user') THEN
+        ALTER TYPE "Role" OWNER TO vdat_user;
+        ALTER TYPE "ViolationStatus" OWNER TO vdat_user;
+        ALTER TABLE "users" OWNER TO vdat_user;
+        ALTER TABLE "zone_profiles" OWNER TO vdat_user;
+        ALTER TABLE "cameras" OWNER TO vdat_user;
+        ALTER TABLE "violations" OWNER TO vdat_user;
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO vdat_user;
+        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO vdat_user;
+    END IF;
+END
+$$;
+
+-- -----------------------------------------------------------------------------
+-- PART 7: Default Camera Slots (cam-01 through cam-06)
+-- -----------------------------------------------------------------------------
+
+INSERT INTO "cameras" ("id", "name", "location", "isActive") VALUES
+    ('cam-01', 'Camera 01 (Primary)', 'Intersection 1', false),
+    ('cam-02', 'Camera 02', 'Intersection 2', false),
+    ('cam-03', 'Camera 03', 'Intersection 3', false),
+    ('cam-04', 'Camera 04', 'Intersection 4', false),
+    ('cam-05', 'Camera 05', 'Intersection 5', false),
+    ('cam-06', 'Camera 06', 'Intersection 6', false)
+ON CONFLICT ("id") DO NOTHING;
 
 -- -----------------------------------------------------------------------------
 -- Connection string for .env:
 -- DATABASE_URL="postgresql://vdat_user:vdat_secret@localhost:5432/vdat_db?schema=public"
+-- After running this script, re-run `npm run prisma:seed` to populate default accounts.
 -- -----------------------------------------------------------------------------

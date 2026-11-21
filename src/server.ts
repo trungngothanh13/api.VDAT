@@ -13,6 +13,9 @@ async function ensureDefaultCameras() {
     { id: 'cam-01', name: 'Camera 01 (Primary)', location: 'Intersection 1' },
     { id: 'cam-02', name: 'Camera 02', location: 'Intersection 2' },
     { id: 'cam-03', name: 'Camera 03', location: 'Intersection 3' },
+    { id: 'cam-04', name: 'Camera 04', location: 'Intersection 4' },
+    { id: 'cam-05', name: 'Camera 05', location: 'Intersection 5' },
+    { id: 'cam-06', name: 'Camera 06', location: 'Intersection 6' },
   ];
   for (const cam of defaults) {
     await prisma.camera.upsert({
@@ -23,14 +26,6 @@ async function ensureDefaultCameras() {
         name: cam.name,
         location: cam.location,
         isActive: false,
-        config: {
-          create: {
-            lanes: [],
-            intersection: [],
-            lightBox: [],
-            version: 1,
-          },
-        },
       },
     });
   }

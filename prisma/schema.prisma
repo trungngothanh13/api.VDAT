@@ -19,52 +19,64 @@ enum ViolationStatus {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  email        String        @unique
+  id           String      @id @default(uuid())
+  email        String      @unique
   passwordHash String
   fullName     String
-  role         Role          @default(POLICE)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  role         Role        @default(POLICE)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   violations   Violation[]
 
   @@map("users")
 }
 
-model Camera {
-  id         String        @id // e.g. "cam-01"
-  name       String
-  location   String
-  rtspUrl    String?
-  isActive   Boolean       @default(true)
-  lastSeenAt DateTime?
-  metadata   Json?         // { fps, width, height, tracker, model }
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+model ZoneProfile {
+  id               String      @id @default(uuid())
+  sourceKey        String      @unique // e.g. "file:test_1.mp4", "webcam:default", "camera:cam-01"
+  name             String
+  lanes            Json        // Approach Lane polygons: [[[x,y], ...], ...]
+  intersection     Json        // Intersection polygon: [[x,y], ...]
+  exitZones        Json        @default("[]") // Exit Zone polygons: [[[x,y], ...], ...]
+  lightBox         Json?       // Traffic light sampling boxes: [{x, y, color}]
+  crossingMode     Boolean     @default(false) // 3/4-way multi-lane crossing mode toggle
+  clearanceSeconds Float       @default(3.0)
+  version          Int         @default(1)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
-  config     CameraConfig?
-  violations Violation[]
+  cameras          Camera[]
+  violations       Violation[]
 
-  @@map("cameras")
+  @@map("zone_profiles")
 }
 
-model CameraConfig {
-  id           String   @id @default(uuid())
-  cameraId     String   @unique
-  camera       Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
-  lanes        Json     // Array of lane polygon coordinate sets
-  intersection Json     // Intersection polygon coordinates
-  lightBox     Json?    // Traffic light detection bounding box
-  version      Int      @default(1)
-  updatedAt    DateTime @updatedAt
+model Camera {
+  id                  String       @id // e.g. "cam-01"
+  name                String
+  location            String
+  rtspUrl             String?
+  isActive            Boolean      @default(false)
+  lastSeenAt          DateTime?
+  activeSourceKey     String?
+  activeZoneProfileId String?
+  activeZoneProfile   ZoneProfile? @relation(fields: [activeZoneProfileId], references: [id], onDelete: SetNull)
+  metadata            Json?        // { fps, width, height, tracker, model }
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
-  @@map("camera_configs")
+  violations          Violation[]
+
+  @@map("cameras")
 }
 
 model Violation {
   id              String          @id @default(uuid())
   cameraId        String
   camera          Camera          @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  zoneProfileId   String?
+  zoneProfile     ZoneProfile?    @relation(fields: [zoneProfileId], references: [id], onDelete: SetNull)
+  sourceKey       String?
   trackId         Int
   vehicleClass    String          // e.g. "motorcycle", "car"
   classId         Int

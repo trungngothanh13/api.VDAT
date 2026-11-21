@@ -6,6 +6,7 @@ import { ViolationStatus } from '@prisma/client';
 import { prisma } from '../config/prisma.js';
 import { config } from '../config/env.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
+import { wsManager } from '../websocket/ws.manager.js';
 
 export async function listViolations(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -101,17 +102,26 @@ export async function updateViolationStatus(req: AuthRequest, res: Response, nex
       },
     });
 
-    // If a violation is dismissed, immediately purge any cached temporary video clip on disk
+    // If a violation is dismissed, immediately purge both its cached MP4 clip and JPG snapshot
+    // and instruct the AI module to delete its local MP4 copy
     if (status === ViolationStatus.DISMISSED) {
       const clipName = `violation_${updated.cameraId}_id${updated.trackId}_f${updated.frameNumber}.mp4`;
       const clipPath = path.join(config.uploadDir, 'evidence', clipName);
-      try {
-        if (fs.existsSync(clipPath)) {
-          fs.unlinkSync(clipPath);
-        }
-      } catch {
-        // Ignore cleanup errors
-      }
+      const snapshotName = updated.snapshotUrl
+        ? path.basename(updated.snapshotUrl)
+        : `snapshot_${updated.cameraId}_id${updated.trackId}_f${updated.frameNumber}.jpg`;
+      const snapshotPath = path.join(config.uploadDir, 'evidence', snapshotName);
+
+      await Promise.all([
+        fs.promises.unlink(clipPath).catch(() => {}),
+        fs.promises.unlink(snapshotPath).catch(() => {}),
+      ]);
+
+      wsManager.sendToInference(updated.cameraId, {
+        type: 'delete_evidence_clip',
+        cameraId: updated.cameraId,
+        filename: clipName,
+      });
     }
 
     res.json(updated);

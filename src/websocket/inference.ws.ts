@@ -41,16 +41,16 @@ export function handleInferenceConnection(ws: WebSocket): void {
               lastSeenAt: new Date(),
               metadata: pipeline || {},
             },
-            include: { config: true },
+            include: { activeZoneProfile: true },
           });
 
-          // Send acknowledgment and current zone config to AI engine
+          // Send acknowledgment and current active ZoneProfile to AI engine
           ws.send(
             JSON.stringify({
               type: 'camera_ack',
               status: 'OK',
               cameraId,
-              zones: camera.config || null,
+              zones: camera.activeZoneProfile || null,
             })
           );
           break;
@@ -76,18 +76,20 @@ export function handleInferenceConnection(ws: WebSocket): void {
 
           let snapshotUrl: string | null = null;
 
-          // Save base64 snapshot to disk if present
+          // Save base64 snapshot asynchronously so the WebSocket event loop stays responsive
           if (evidenceImage) {
             const filename = `snapshot_${cameraId}_id${event.track_id}_f${event.frame_number}.jpg`;
             const filepath = path.join(evidenceDir, filename);
             const buffer = Buffer.from(evidenceImage, 'base64');
-            fs.writeFileSync(filepath, buffer);
+            await fs.promises.writeFile(filepath, buffer);
             snapshotUrl = `/uploads/evidence/${filename}`;
-            enforceEvidenceCacheLimits();
+            setImmediate(() => {
+              void enforceEvidenceCacheLimits();
+            });
           }
 
-          // Ensure camera exists (in case violation arrives before camera_init)
-          await prisma.camera.upsert({
+          // Ensure camera exists and capture its active ZoneProfile linkage
+          const cam = await prisma.camera.upsert({
             where: { id: cameraId },
             update: { lastSeenAt: new Date() },
             create: {
@@ -97,12 +99,18 @@ export function handleInferenceConnection(ws: WebSocket): void {
               isActive: true,
               lastSeenAt: new Date(),
             },
+            select: {
+              activeZoneProfileId: true,
+              activeSourceKey: true,
+            },
           });
 
           // Persist violation into PostgreSQL
           const record = await prisma.violation.create({
             data: {
               cameraId,
+              zoneProfileId: cam.activeZoneProfileId ?? null,
+              sourceKey: cam.activeSourceKey ?? null,
               trackId: event.track_id,
               vehicleClass: event.vehicle_class,
               classId: event.class_id,
@@ -115,7 +123,7 @@ export function handleInferenceConnection(ws: WebSocket): void {
             },
           });
 
-          console.log(`🚨 [Inference WS] Violation saved to DB: Vehicle #${event.track_id} (${event.vehicle_class})`);
+          console.log(`🚨 [Inference WS] Violation saved to DB (${cameraId}): Vehicle #${event.track_id} (${event.vehicle_class})`);
 
           // Broadcast alert to all active dashboard users
           wsManager.broadcastToClients({
