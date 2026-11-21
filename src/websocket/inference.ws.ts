@@ -1,21 +1,56 @@
-import { WebSocket } from 'ws';
+import { RawData, WebSocket } from 'ws';
 import fs from 'fs';
 import path from 'path';
 import { prisma } from '../config/prisma.js';
 import { config } from '../config/env.js';
 import { wsManager } from './ws.manager.js';
+import { encodeBinaryFrame, parseBinaryFrame } from './binary-frame.js';
 import { enforceEvidenceCacheLimits } from '../routes/evidence.routes.js';
 
 const evidenceDir = path.join(config.uploadDir, 'evidence');
 fs.mkdirSync(evidenceDir, { recursive: true });
+
+function rawDataToBuffer(data: RawData): Buffer {
+  if (Buffer.isBuffer(data)) return data;
+  if (Array.isArray(data)) return Buffer.concat(data);
+  return Buffer.from(data);
+}
 
 export function handleInferenceConnection(ws: WebSocket): void {
   let boundCameraId: string | null = null;
 
   console.log('[Inference WS] New connection received from AI Engine.');
 
-  ws.on('message', async (data: Buffer | string) => {
+  ws.on('message', async (data: RawData, isBinary: boolean) => {
     try {
+      if (isBinary) {
+        const buf = rawDataToBuffer(data);
+        const parsed = parseBinaryFrame(buf);
+        if (!parsed) return;
+
+        if (parsed.header.type === 'frame') {
+          const cameraId = parsed.header.cameraId || boundCameraId || 'cam-01';
+          const ackedFrames = typeof parsed.header.ackedFrames === 'number' ? parsed.header.ackedFrames : 1;
+          wsManager.ackInferenceFrame(cameraId, ackedFrames);
+          if (parsed.header.telemetry) {
+            wsManager.broadcastTelemetryToClients(cameraId, parsed.header.telemetry);
+          }
+          if (parsed.payload.length > 0) {
+            const outBuf = encodeBinaryFrame(
+              {
+                type: 'live_frame',
+                cameraId,
+                telemetry: parsed.header.telemetry,
+                timestamp: Date.now(),
+              },
+              parsed.payload
+            );
+            wsManager.broadcastFrameToFocusedClients(cameraId, outBuf);
+          }
+        }
+        return;
+      }
+
       const message = JSON.parse(data.toString());
 
       switch (message.type) {
@@ -57,17 +92,30 @@ export function handleInferenceConnection(ws: WebSocket): void {
         }
 
         case 'frame': {
+          const ackedFrames = typeof message.ackedFrames === 'number' ? message.ackedFrames : 1;
+          wsManager.ackInferenceFrame(message.cameraId, ackedFrames);
+
           // Always send lightweight telemetry for all cameras (for Multi-Source Wall status)
           wsManager.broadcastTelemetryToClients(message.cameraId, message.telemetry);
 
-          // Send heavy AI-annotated frame only to clients currently focused on this camera
-          wsManager.broadcastFrameToFocusedClients(message.cameraId, {
-            type: 'live_frame',
-            cameraId: message.cameraId,
-            telemetry: message.telemetry,
-            image: message.image,
-            timestamp: Date.now(),
-          });
+          // Send heavy AI-annotated frame only if an image was attached and clients focus on this camera
+          if (message.image) {
+            wsManager.broadcastFrameToFocusedClients(message.cameraId, {
+              type: 'live_frame',
+              cameraId: message.cameraId,
+              telemetry: message.telemetry,
+              image: message.image,
+              timestamp: Date.now(),
+            });
+          }
+          break;
+        }
+
+        case 'frame_ack': {
+          const cameraId = message.cameraId || boundCameraId;
+          if (cameraId) {
+            wsManager.ackInferenceFrame(cameraId, typeof message.count === 'number' ? message.count : 1);
+          }
           break;
         }
 

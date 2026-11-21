@@ -1,6 +1,13 @@
-import { WebSocket } from 'ws';
+import { RawData, WebSocket } from 'ws';
 import { prisma } from '../config/prisma.js';
 import { wsManager } from './ws.manager.js';
+import { parseBinaryFrame } from './binary-frame.js';
+
+function rawDataToBuffer(data: RawData): Buffer {
+  if (Buffer.isBuffer(data)) return data;
+  if (Array.isArray(data)) return Buffer.concat(data);
+  return Buffer.from(data);
+}
 
 export function handleClientConnection(ws: WebSocket): void {
   wsManager.registerClient(ws);
@@ -14,8 +21,22 @@ export function handleClientConnection(ws: WebSocket): void {
     })
   );
 
-  ws.on('message', async (data: Buffer | string) => {
+  ws.on('message', async (data: RawData, isBinary: boolean) => {
     try {
+      if (isBinary) {
+        const buf = rawDataToBuffer(data);
+        const parsed = parseBinaryFrame(buf);
+        if (!parsed) return;
+        if (parsed.header.type === 'source_frame') {
+          const cameraId = parsed.header.cameraId || 'cam-01';
+          if (wsManager.hasActiveInference(cameraId)) {
+            wsManager.setInferenceMode(cameraId, 'ws');
+            wsManager.enqueueFrameForInference(cameraId, buf);
+          }
+        }
+        return;
+      }
+
       const msg = JSON.parse(data.toString());
 
       switch (msg.type) {
@@ -132,14 +153,17 @@ export function handleClientConnection(ws: WebSocket): void {
           // Never echo raw unannotated browser frames back as live_frame!
           if (wsManager.hasActiveInference(cameraId)) {
             wsManager.setInferenceMode(cameraId, 'ws');
-            wsManager.sendToInference(cameraId, {
-              type: 'ingest_frame',
+            wsManager.enqueueFrameForInference(
               cameraId,
-              sourceType: msg.sourceType || 'web_stream',
-              frameNumber: msg.frameNumber || 0,
-              image,
-              timestamp: msg.timestamp || Date.now(),
-            });
+              JSON.stringify({
+                type: 'ingest_frame',
+                cameraId,
+                sourceType: msg.sourceType || 'web_stream',
+                frameNumber: msg.frameNumber || 0,
+                image,
+                timestamp: msg.timestamp || Date.now(),
+              })
+            );
           }
           break;
         }
@@ -147,6 +171,7 @@ export function handleClientConnection(ws: WebSocket): void {
         case 'source_stop': {
           const cameraId = msg.cameraId || 'cam-01';
           wsManager.unregisterWebSource(cameraId, ws);
+          wsManager.clearPendingFrame(cameraId);
           break;
         }
 
