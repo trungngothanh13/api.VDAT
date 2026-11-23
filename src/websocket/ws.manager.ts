@@ -362,23 +362,6 @@ export class WebSocketManager {
     }
   }
 
-  public broadcastOverlayToFocusedClients(cameraId: string, payload: Record<string, any>): void {
-    const message = JSON.stringify(payload);
-    for (const ws of this.clientSockets) {
-      if (
-        ws.readyState === WebSocket.OPEN &&
-        (this.clientFocusCamera.get(ws) ?? 'cam-01') === cameraId &&
-        ws.bufferedAmount <= MAX_CLIENT_BUFFERED_BYTES
-      ) {
-        try {
-          ws.send(message);
-        } catch (err) {
-          console.error('[WS Manager] Overlay send error to client:', err);
-        }
-      }
-    }
-  }
-
   public broadcastToClients(payload: any): void {
     const message = JSON.stringify(payload);
     for (const ws of this.clientSockets) {

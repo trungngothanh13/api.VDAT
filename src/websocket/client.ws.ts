@@ -118,7 +118,6 @@ export function handleClientConnection(ws: WebSocket): void {
               sourceType: 'web_stream',
               sourceValue: msg.label || sourceKey,
               sourceKey,
-              overlayOnly: Boolean(msg.overlayOnly),
               loop: true,
             });
             // Auto-apply saved ZoneProfile or reset stale zones when switching sources
