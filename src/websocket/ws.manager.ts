@@ -75,11 +75,19 @@ export class WebSocketManager {
 
   // --- Inference Sockets (Python AI Engine) ---
   public registerInference(cameraId: string, ws: WebSocket, ingestMode: string = 'local'): void {
+    const prevWs = this.inferenceSockets.get(cameraId);
     this.inferenceSockets.set(cameraId, ws);
     this.inferenceModes.set(cameraId, ingestMode);
     this.inferenceFlow.set(cameraId, { nextSeq: 0, ackedSeq: 0, lastSentAt: 0 });
     this.latestPendingFrameByCamera.delete(cameraId);
     this.inferenceSendImage.delete(cameraId);
+    if (prevWs && prevWs !== ws) {
+      try {
+        prevWs.terminate();
+      } catch {
+        // Ignore stale socket close errors
+      }
+    }
     console.log(`[WS Manager] AI Inference connected for camera: ${cameraId} (mode: ${ingestMode})`);
     this.syncInferenceStreamFocus();
     this.broadcastToClients({
@@ -90,7 +98,37 @@ export class WebSocketManager {
     });
   }
 
-  public unregisterInference(cameraId: string): void {
+  public ensureInferenceSocket(cameraId: string, ws: WebSocket): void {
+    if (ws.readyState !== WebSocket.OPEN || this.inferenceSockets.get(cameraId) === ws) {
+      return;
+    }
+    this.inferenceSockets.set(cameraId, ws);
+    this.inferenceSendImage.delete(cameraId);
+    this.syncInferenceStreamFocus();
+    this.broadcastToClients({
+      type: 'camera_status',
+      cameraId,
+      status: 'ONLINE',
+      timestamp: Date.now(),
+    });
+    try {
+      ws.send(
+        JSON.stringify({
+          type: 'set_bypass_zones',
+          cameraId,
+          bypass: this.getCameraBypassZones(cameraId),
+        })
+      );
+    } catch {
+      // Ignore transient send errors
+    }
+  }
+
+  public unregisterInference(cameraId: string, ws?: WebSocket): boolean {
+    const current = this.inferenceSockets.get(cameraId);
+    if (ws && current !== ws) {
+      return false;
+    }
     this.inferenceSockets.delete(cameraId);
     this.inferenceModes.delete(cameraId);
     this.inferenceFlow.delete(cameraId);
@@ -98,7 +136,6 @@ export class WebSocketManager {
     this.inferenceSendImage.delete(cameraId);
     this.latestFrameByCamera.delete(cameraId);
     this.latestPreviewByCamera.delete(cameraId);
-    this.bypassZonesByCamera.delete(cameraId);
     console.log(`[WS Manager] AI Inference disconnected for camera: ${cameraId}`);
     this.broadcastToClients({
       type: 'camera_status',
@@ -106,6 +143,7 @@ export class WebSocketManager {
       status: 'OFFLINE',
       timestamp: Date.now(),
     });
+    return true;
   }
 
   public hasActiveInference(cameraId: string): boolean {
@@ -230,6 +268,10 @@ export class WebSocketManager {
     this.bypassZonesByCamera.delete(cameraId);
     this.webSourceSockets.delete(cameraId);
     this.clearPendingFrame(cameraId);
+  }
+
+  public hasCameraBypassZonesRecord(cameraId: string): boolean {
+    return this.bypassZonesByCamera.has(cameraId);
   }
 
   public setCameraBypassZones(cameraId: string, bypass: boolean): void {

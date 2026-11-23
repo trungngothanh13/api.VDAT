@@ -30,6 +30,8 @@ export function handleInferenceConnection(ws: WebSocket): void {
 
         if (parsed.header.type === 'frame') {
           const cameraId = parsed.header.cameraId || boundCameraId || 'cam-01';
+          if (!boundCameraId) boundCameraId = cameraId;
+          wsManager.ensureInferenceSocket(cameraId, ws);
           const ackSeq = typeof parsed.header.ackSeq === 'number' ? parsed.header.ackSeq : undefined;
           const ackedFrames = typeof parsed.header.ackedFrames === 'number' ? parsed.header.ackedFrames : 1;
           wsManager.ackInferenceFrame(cameraId, ackSeq, ackedFrames);
@@ -121,12 +123,12 @@ export function handleInferenceConnection(ws: WebSocket): void {
               zones: camera.activeZoneProfile || null,
             })
           );
-          if (wsManager.getCameraBypassZones(cameraId)) {
+          if (ws.readyState === WebSocket.OPEN) {
             ws.send(
               JSON.stringify({
                 type: 'set_bypass_zones',
                 cameraId,
-                bypass: true,
+                bypass: wsManager.getCameraBypassZones(cameraId),
               })
             );
           }
@@ -134,18 +136,21 @@ export function handleInferenceConnection(ws: WebSocket): void {
         }
 
         case 'frame': {
+          const cameraId = message.cameraId || boundCameraId || 'cam-01';
+          if (!boundCameraId) boundCameraId = cameraId;
+          wsManager.ensureInferenceSocket(cameraId, ws);
           const ackSeq = typeof message.ackSeq === 'number' ? message.ackSeq : undefined;
           const ackedFrames = typeof message.ackedFrames === 'number' ? message.ackedFrames : 1;
-          wsManager.ackInferenceFrame(message.cameraId, ackSeq, ackedFrames);
+          wsManager.ackInferenceFrame(cameraId, ackSeq, ackedFrames);
 
           // Always send lightweight telemetry for all cameras (for Multi-Source Wall status)
-          wsManager.broadcastTelemetryToClients(message.cameraId, message.telemetry);
+          wsManager.broadcastTelemetryToClients(cameraId, message.telemetry);
 
           // Send heavy AI-annotated frame only if an image was attached and clients focus on this camera
           if (message.image) {
-            wsManager.broadcastFrameToFocusedClients(message.cameraId, {
+            wsManager.broadcastFrameToFocusedClients(cameraId, {
               type: 'live_frame',
-              cameraId: message.cameraId,
+              cameraId,
               telemetry: message.telemetry,
               image: message.image,
               timestamp: Date.now(),
@@ -171,13 +176,18 @@ export function handleInferenceConnection(ws: WebSocket): void {
         case 'camera_bypass_zones_status': {
           const cameraId = message.cameraId || boundCameraId || 'cam-01';
           const bypass = Boolean(message.bypass);
-          wsManager.setCameraBypassZones(cameraId, bypass);
-          wsManager.broadcastToClients({
-            type: 'camera_bypass_zones_status',
-            cameraId,
-            bypass,
-            timestamp: Date.now(),
-          });
+          const hasRecord = wsManager.hasCameraBypassZonesRecord(cameraId);
+          const recordedBypass = wsManager.getCameraBypassZones(cameraId);
+          console.log(`✅ [Inference WS] Camera '${cameraId}' confirmed bypass zones -> ${bypass}`);
+          if (!hasRecord || recordedBypass === bypass) {
+            wsManager.setCameraBypassZones(cameraId, bypass);
+            wsManager.broadcastToClients({
+              type: 'camera_bypass_zones_status',
+              cameraId,
+              bypass,
+              timestamp: Date.now(),
+            });
+          }
           break;
         }
 
@@ -349,13 +359,15 @@ export function handleInferenceConnection(ws: WebSocket): void {
 
   ws.on('close', () => {
     if (boundCameraId) {
-      wsManager.unregisterInference(boundCameraId);
-      prisma.camera
-        .update({
-          where: { id: boundCameraId },
-          data: { isActive: false },
-        })
-        .catch(() => {});
+      const removed = wsManager.unregisterInference(boundCameraId, ws);
+      if (removed) {
+        prisma.camera
+          .update({
+            where: { id: boundCameraId },
+            data: { isActive: false },
+          })
+          .catch(() => {});
+      }
     }
   });
 

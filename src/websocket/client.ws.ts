@@ -207,11 +207,12 @@ export function handleClientConnection(ws: WebSocket): void {
           const cameraId = msg.cameraId || 'cam-01';
           const bypass = Boolean(msg.bypass);
           wsManager.setCameraBypassZones(cameraId, bypass);
-          wsManager.sendToInference(cameraId, {
+          const sent = wsManager.sendToInference(cameraId, {
             type: 'set_bypass_zones',
             cameraId,
             bypass,
           });
+          console.log(`🚧 [Client WS] Camera '${cameraId}' bypass zones -> ${bypass} (sentToAI=${sent})`);
           wsManager.broadcastToClients({
             type: 'camera_bypass_zones_status',
             cameraId,
