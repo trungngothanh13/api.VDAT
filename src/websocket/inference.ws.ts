@@ -33,10 +33,10 @@ export function handleInferenceConnection(ws: WebSocket): void {
           const ackSeq = typeof parsed.header.ackSeq === 'number' ? parsed.header.ackSeq : undefined;
           const ackedFrames = typeof parsed.header.ackedFrames === 'number' ? parsed.header.ackedFrames : 1;
           wsManager.ackInferenceFrame(cameraId, ackSeq, ackedFrames);
-          if (parsed.header.telemetry) {
-            wsManager.broadcastTelemetryToClients(cameraId, parsed.header.telemetry);
-          }
           if (parsed.payload.length > 0) {
+            if (parsed.header.telemetry) {
+              wsManager.broadcastTelemetryToUnfocusedClients(cameraId, parsed.header.telemetry);
+            }
             const outBuf = encodeBinaryFrame(
               {
                 type: 'live_frame',
@@ -47,6 +47,8 @@ export function handleInferenceConnection(ws: WebSocket): void {
               parsed.payload
             );
             wsManager.broadcastFrameToFocusedClients(cameraId, outBuf);
+          } else if (parsed.header.telemetry) {
+            wsManager.broadcastTelemetryToClients(cameraId, parsed.header.telemetry);
           }
         }
         return;
@@ -140,6 +142,40 @@ export function handleInferenceConnection(ws: WebSocket): void {
               timestamp: Date.now(),
             });
           }
+          break;
+        }
+
+        case 'frame_overlay': {
+          const cameraId = message.cameraId || boundCameraId || 'cam-01';
+          const ackSeq = typeof message.ackSeq === 'number' ? message.ackSeq : undefined;
+          const ackedFrames = typeof message.ackedFrames === 'number' ? message.ackedFrames : 1;
+          wsManager.ackInferenceFrame(cameraId, ackSeq, ackedFrames);
+          if (message.telemetry) {
+            wsManager.broadcastTelemetryToUnfocusedClients(cameraId, message.telemetry);
+          }
+          if (message.overlay) {
+            wsManager.broadcastOverlayToFocusedClients(cameraId, {
+              type: 'live_overlay',
+              cameraId,
+              overlay: message.overlay,
+              telemetry: message.telemetry,
+              timestamp: Date.now(),
+            });
+          }
+          break;
+        }
+
+        case 'source_status': {
+          const cameraId = message.cameraId || boundCameraId || 'cam-01';
+          wsManager.broadcastToClients({
+            type: 'camera_source_status',
+            cameraId,
+            status: message.status,
+            sourceType: message.sourceType,
+            label: message.label,
+            error: message.error,
+            timestamp: Date.now(),
+          });
           break;
         }
 

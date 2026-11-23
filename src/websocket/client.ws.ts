@@ -2,6 +2,7 @@ import { RawData, WebSocket } from 'ws';
 import { prisma } from '../config/prisma.js';
 import { wsManager } from './ws.manager.js';
 import { parseBinaryFrame } from './binary-frame.js';
+import { cleanupStagedVideoForCamera } from '../controllers/camera.controller.js';
 
 function rawDataToBuffer(data: RawData): Buffer {
   if (Buffer.isBuffer(data)) return data;
@@ -117,6 +118,7 @@ export function handleClientConnection(ws: WebSocket): void {
               sourceType: 'web_stream',
               sourceValue: msg.label || sourceKey,
               sourceKey,
+              overlayOnly: Boolean(msg.overlayOnly),
               loop: true,
             });
             // Auto-apply saved ZoneProfile or reset stale zones when switching sources
@@ -174,8 +176,23 @@ export function handleClientConnection(ws: WebSocket): void {
 
         case 'source_stop': {
           const cameraId = msg.cameraId || 'cam-01';
+          cleanupStagedVideoForCamera(cameraId);
           wsManager.unregisterWebSource(cameraId, ws);
           wsManager.clearPendingFrame(cameraId);
+          wsManager.sendToInference(cameraId, {
+            type: 'stop_source',
+            cameraId,
+          });
+          break;
+        }
+
+        case 'set_source_loop': {
+          const cameraId = msg.cameraId || 'cam-01';
+          wsManager.sendToInference(cameraId, {
+            type: 'set_source_loop',
+            cameraId,
+            loop: Boolean(msg.loop),
+          });
           break;
         }
 
