@@ -133,7 +133,7 @@ export function handleClientConnection(ws: WebSocket): void {
                 exitZones: [],
                 lightBox: [],
                 crossingMode: false,
-                clearanceSeconds: 3.0,
+                clearanceSeconds: 0,
               },
             });
           } else {

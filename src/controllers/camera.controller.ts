@@ -262,7 +262,7 @@ export async function uploadCameraVideoSource(
         exitZones: [],
         lightBox: [],
         crossingMode: false,
-        clearanceSeconds: 3.0,
+        clearanceSeconds: 0,
       },
     });
 
@@ -370,7 +370,7 @@ const updateZoneSchema = z.object({
   exitZones: z.array(z.any()).optional().default([]),
   lightBox: z.any().optional(),
   crossingMode: z.boolean().optional().default(false),
-  clearanceSeconds: z.number().min(0).max(15).optional().default(3.0),
+  clearanceSeconds: z.number().min(0).max(15).optional().default(0),
 });
 
 export async function updateZoneConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
