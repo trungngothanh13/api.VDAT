@@ -13,11 +13,12 @@ function rawDataToBuffer(data: RawData): Buffer {
 export function handleClientConnection(ws: WebSocket): void {
   wsManager.registerClient(ws);
 
-  // Send initial handshake with active camera list, model profile, and tracking engine
+  // Send initial handshake with active camera list, previews, model profile, and tracking engine
   ws.send(
     JSON.stringify({
       type: 'connection_established',
       activeCameras: wsManager.getActiveCameras(),
+      cameraPreviews: wsManager.getCameraPreviews(),
       modelStatus: wsManager.getActiveModelStatus(),
       trackerStatus: wsManager.getActiveTrackerStatus(),
       timestamp: Date.now(),
@@ -176,12 +177,18 @@ export function handleClientConnection(ws: WebSocket): void {
         case 'source_stop': {
           const cameraId = msg.cameraId || 'cam-01';
           cleanupStagedVideoForCamera(cameraId);
+          wsManager.clearCameraPreview(cameraId);
           wsManager.unregisterWebSource(cameraId, ws);
           wsManager.clearPendingFrame(cameraId);
           wsManager.sendToInference(cameraId, {
             type: 'stop_source',
             cameraId,
           });
+          break;
+        }
+
+        case 'request_camera_previews': {
+          wsManager.requestAllCameraPreviews();
           break;
         }
 

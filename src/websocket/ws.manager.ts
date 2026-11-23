@@ -61,6 +61,7 @@ export class WebSocketManager {
   private clientSockets: Set<WebSocket> = new Set();
   private clientFocusCamera: Map<WebSocket, string> = new Map();
   private latestFrameByCamera: Map<string, Buffer | string> = new Map();
+  private latestPreviewByCamera: Map<string, string> = new Map();
 
   private constructor() {}
 
@@ -95,6 +96,7 @@ export class WebSocketManager {
     this.latestPendingFrameByCamera.delete(cameraId);
     this.inferenceSendImage.delete(cameraId);
     this.latestFrameByCamera.delete(cameraId);
+    this.latestPreviewByCamera.delete(cameraId);
     console.log(`[WS Manager] AI Inference disconnected for camera: ${cameraId}`);
     this.broadcastToClients({
       type: 'camera_status',
@@ -222,8 +224,37 @@ export class WebSocketManager {
 
   public cleanupCamera(cameraId: string): void {
     this.latestFrameByCamera.delete(cameraId);
+    this.latestPreviewByCamera.delete(cameraId);
     this.webSourceSockets.delete(cameraId);
     this.clearPendingFrame(cameraId);
+  }
+
+  public setCameraPreview(cameraId: string, image: string): void {
+    this.latestPreviewByCamera.set(cameraId, image);
+  }
+
+  public clearCameraPreview(cameraId: string): void {
+    this.latestPreviewByCamera.delete(cameraId);
+  }
+
+  public getCameraPreviews(): Record<string, string> {
+    const previews: Record<string, string> = {};
+    for (const [camId, img] of this.latestPreviewByCamera.entries()) {
+      previews[camId] = img;
+    }
+    return previews;
+  }
+
+  public requestAllCameraPreviews(): void {
+    for (const [camId, sock] of this.inferenceSockets.entries()) {
+      if (sock.readyState === WebSocket.OPEN) {
+        try {
+          sock.send(JSON.stringify({ type: 'request_preview', cameraId: camId }));
+        } catch {
+          // Ignore send errors
+        }
+      }
+    }
   }
 
   public syncInferenceStreamFocus(): void {

@@ -145,8 +145,25 @@ export function handleInferenceConnection(ws: WebSocket): void {
           break;
         }
 
+        case 'camera_preview': {
+          const cameraId = message.cameraId || boundCameraId || 'cam-01';
+          if (typeof message.image === 'string' && message.image.length > 0) {
+            wsManager.setCameraPreview(cameraId, message.image);
+            wsManager.broadcastToClients({
+              type: 'camera_preview',
+              cameraId,
+              image: message.image,
+              timestamp: Date.now(),
+            });
+          }
+          break;
+        }
+
         case 'source_status': {
           const cameraId = message.cameraId || boundCameraId || 'cam-01';
+          if (message.status === 'stopped' || message.status === 'ended') {
+            wsManager.clearCameraPreview(cameraId);
+          }
           wsManager.broadcastToClients({
             type: 'camera_source_status',
             cameraId,
