@@ -19,6 +19,7 @@ export function handleClientConnection(ws: WebSocket): void {
       type: 'connection_established',
       activeCameras: wsManager.getActiveCameras(),
       cameraPreviews: wsManager.getCameraPreviews(),
+      bypassZonesByCamera: wsManager.getCameraBypassZonesMap(),
       modelStatus: wsManager.getActiveModelStatus(),
       trackerStatus: wsManager.getActiveTrackerStatus(),
       timestamp: Date.now(),
@@ -198,6 +199,24 @@ export function handleClientConnection(ws: WebSocket): void {
             type: 'set_source_loop',
             cameraId,
             loop: Boolean(msg.loop),
+          });
+          break;
+        }
+
+        case 'set_camera_bypass_zones': {
+          const cameraId = msg.cameraId || 'cam-01';
+          const bypass = Boolean(msg.bypass);
+          wsManager.setCameraBypassZones(cameraId, bypass);
+          wsManager.sendToInference(cameraId, {
+            type: 'set_bypass_zones',
+            cameraId,
+            bypass,
+          });
+          wsManager.broadcastToClients({
+            type: 'camera_bypass_zones_status',
+            cameraId,
+            bypass,
+            timestamp: Date.now(),
           });
           break;
         }

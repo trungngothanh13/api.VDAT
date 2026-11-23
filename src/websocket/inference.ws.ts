@@ -121,6 +121,15 @@ export function handleInferenceConnection(ws: WebSocket): void {
               zones: camera.activeZoneProfile || null,
             })
           );
+          if (wsManager.getCameraBypassZones(cameraId)) {
+            ws.send(
+              JSON.stringify({
+                type: 'set_bypass_zones',
+                cameraId,
+                bypass: true,
+              })
+            );
+          }
           break;
         }
 
@@ -156,6 +165,19 @@ export function handleInferenceConnection(ws: WebSocket): void {
               timestamp: Date.now(),
             });
           }
+          break;
+        }
+
+        case 'camera_bypass_zones_status': {
+          const cameraId = message.cameraId || boundCameraId || 'cam-01';
+          const bypass = Boolean(message.bypass);
+          wsManager.setCameraBypassZones(cameraId, bypass);
+          wsManager.broadcastToClients({
+            type: 'camera_bypass_zones_status',
+            cameraId,
+            bypass,
+            timestamp: Date.now(),
+          });
           break;
         }
 

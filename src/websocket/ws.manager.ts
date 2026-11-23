@@ -62,6 +62,7 @@ export class WebSocketManager {
   private clientFocusCamera: Map<WebSocket, string> = new Map();
   private latestFrameByCamera: Map<string, Buffer | string> = new Map();
   private latestPreviewByCamera: Map<string, string> = new Map();
+  private bypassZonesByCamera: Map<string, boolean> = new Map();
 
   private constructor() {}
 
@@ -97,6 +98,7 @@ export class WebSocketManager {
     this.inferenceSendImage.delete(cameraId);
     this.latestFrameByCamera.delete(cameraId);
     this.latestPreviewByCamera.delete(cameraId);
+    this.bypassZonesByCamera.delete(cameraId);
     console.log(`[WS Manager] AI Inference disconnected for camera: ${cameraId}`);
     this.broadcastToClients({
       type: 'camera_status',
@@ -225,8 +227,25 @@ export class WebSocketManager {
   public cleanupCamera(cameraId: string): void {
     this.latestFrameByCamera.delete(cameraId);
     this.latestPreviewByCamera.delete(cameraId);
+    this.bypassZonesByCamera.delete(cameraId);
     this.webSourceSockets.delete(cameraId);
     this.clearPendingFrame(cameraId);
+  }
+
+  public setCameraBypassZones(cameraId: string, bypass: boolean): void {
+    this.bypassZonesByCamera.set(cameraId, bypass);
+  }
+
+  public getCameraBypassZones(cameraId: string): boolean {
+    return Boolean(this.bypassZonesByCamera.get(cameraId));
+  }
+
+  public getCameraBypassZonesMap(): Record<string, boolean> {
+    const out: Record<string, boolean> = {};
+    for (const [camId, val] of this.bypassZonesByCamera.entries()) {
+      out[camId] = val;
+    }
+    return out;
   }
 
   public setCameraPreview(cameraId: string, image: string): void {
