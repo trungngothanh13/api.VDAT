@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import path from 'path';
 import { config } from './config/env.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 
@@ -59,14 +58,8 @@ export function createApp(): express.Application {
   // Serve static evidence snapshots and video clips
   app.use('/uploads', express.static(config.uploadDir));
 
-  // Serve static web dashboard files
-  const publicDir = path.resolve('./public');
-  app.use(express.static(publicDir));
-
-  // Live Camera Stream & Violation Proofs Explorer
-  app.get(['/', '/live', '/monitor'], (_req, res) => {
-    res.sendFile(path.join(publicDir, 'index.html'));
-  });
+  // Root redirects to interactive API docs (UI is served by web.VDAT)
+  app.get('/', (_req, res) => res.redirect('/docs'));
 
   // Health check endpoint
   app.get('/health', (_req, res) => {

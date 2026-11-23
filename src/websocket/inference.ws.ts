@@ -5,7 +5,7 @@ import { prisma } from '../config/prisma.js';
 import { config } from '../config/env.js';
 import { wsManager } from './ws.manager.js';
 import { encodeBinaryFrame, parseBinaryFrame } from './binary-frame.js';
-import { enforceEvidenceCacheLimits } from '../routes/evidence.routes.js';
+import { enforceEvidenceCacheLimits } from '../services/evidence-cache.service.js';
 
 const evidenceDir = path.join(config.uploadDir, 'evidence');
 fs.mkdirSync(evidenceDir, { recursive: true });
@@ -145,17 +145,6 @@ export function handleInferenceConnection(ws: WebSocket): void {
 
           // Always send lightweight telemetry for all cameras (for Multi-Source Wall status)
           wsManager.broadcastTelemetryToClients(cameraId, message.telemetry);
-
-          // Send heavy AI-annotated frame only if an image was attached and clients focus on this camera
-          if (message.image) {
-            wsManager.broadcastFrameToFocusedClients(cameraId, {
-              type: 'live_frame',
-              cameraId,
-              telemetry: message.telemetry,
-              image: message.image,
-              timestamp: Date.now(),
-            });
-          }
           break;
         }
 

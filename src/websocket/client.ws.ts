@@ -152,29 +152,6 @@ export function handleClientConnection(ws: WebSocket): void {
           break;
         }
 
-        case 'source_frame': {
-          const cameraId = msg.cameraId || 'cam-01';
-          const image = msg.image;
-          if (!image) break;
-
-          // Only forward frames when the Python AI Engine is connected.
-          // Never echo raw unannotated browser frames back as live_frame!
-          if (wsManager.hasActiveInference(cameraId)) {
-            wsManager.setInferenceMode(cameraId, 'ws');
-            wsManager.enqueueFrameForInference(cameraId, {
-              header: {
-                type: 'ingest_frame',
-                cameraId,
-                sourceType: msg.sourceType || 'web_stream',
-                frameNumber: msg.frameNumber || 0,
-                image,
-                timestamp: msg.timestamp || Date.now(),
-              },
-            });
-          }
-          break;
-        }
-
         case 'source_stop': {
           const cameraId = msg.cameraId || 'cam-01';
           cleanupStagedVideoForCamera(cameraId);
@@ -218,20 +195,6 @@ export function handleClientConnection(ws: WebSocket): void {
             cameraId,
             bypass,
             timestamp: Date.now(),
-          });
-          break;
-        }
-
-        case 'switch_ai_source': {
-          const cameraId = msg.cameraId || 'cam-01';
-          const sType = msg.sourceType || 'server_video';
-          wsManager.setInferenceMode(cameraId, sType === 'web_stream' ? 'ws' : 'local');
-          wsManager.sendToInference(cameraId, {
-            type: 'switch_source',
-            cameraId,
-            sourceType: sType,
-            sourceValue: msg.sourceValue || 'test_1.mp4',
-            loop: msg.loop ?? true,
           });
           break;
         }

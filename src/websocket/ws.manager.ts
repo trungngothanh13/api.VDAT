@@ -1,9 +1,5 @@
 import { WebSocket } from 'ws';
-import { EventEmitter } from 'events';
 import { encodeBinaryFrame } from './binary-frame.js';
-
-export const evidenceEvents = new EventEmitter();
-evidenceEvents.setMaxListeners(100);
 
 // Sized for ~300ms international RTT (BDP: 15 FPS * 0.30s = 4.5 -> 8 frames keeps 15 FPS smooth with <180KB in flight)
 const MAX_IN_FLIGHT_FRAMES = 8;
@@ -151,12 +147,6 @@ export class WebSocketManager {
     return Boolean(ws && ws.readyState === WebSocket.OPEN);
   }
 
-  public isInferenceIngestingFromWeb(cameraId: string): boolean {
-    const ws = this.inferenceSockets.get(cameraId);
-    const mode = this.inferenceModes.get(cameraId);
-    return Boolean(ws && ws.readyState === WebSocket.OPEN && mode === 'ws');
-  }
-
   public setInferenceMode(cameraId: string, mode: string): void {
     if (this.inferenceSockets.has(cameraId)) {
       this.inferenceModes.set(cameraId, mode);
@@ -166,9 +156,6 @@ export class WebSocketManager {
   public sendToInference(cameraId: string, payload: any): boolean {
     const ws = this.inferenceSockets.get(cameraId);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      if (payload?.type === 'ingest_frame' && ws.bufferedAmount > MAX_CLIENT_BUFFERED_BYTES) {
-        return false;
-      }
       ws.send(JSON.stringify(payload));
       return true;
     }
