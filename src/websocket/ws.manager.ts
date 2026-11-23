@@ -22,6 +22,18 @@ export interface QueuedInferenceFrame {
   payload?: Buffer;
 }
 
+export interface AiModelStatus {
+  profile: 'trained' | 'stock';
+  modelName: string;
+  confidence?: number;
+  switching?: boolean;
+}
+
+export interface AiTrackerStatus {
+  tracker: 'bytetrack' | 'botsort' | 'deepsort';
+  switching?: boolean;
+}
+
 export class WebSocketManager {
   private static instance: WebSocketManager;
 
@@ -31,6 +43,16 @@ export class WebSocketManager {
   private inferenceFlow: Map<string, InferenceFlowState> = new Map();
   private latestPendingFrameByCamera: Map<string, QueuedInferenceFrame> = new Map();
   private inferenceSendImage: Map<string, boolean> = new Map();
+  private activeModelStatus: AiModelStatus = {
+    profile: 'trained',
+    modelName: 'best.pt',
+    confidence: 0.45,
+    switching: false,
+  };
+  private activeTrackerStatus: AiTrackerStatus = {
+    tracker: 'bytetrack',
+    switching: false,
+  };
 
   // Active web-fed camera transmitters (video file or laptop webcam): Map<cameraId, WebSocket>
   private webSourceSockets: Map<string, WebSocket> = new Map();
@@ -198,6 +220,12 @@ export class WebSocketManager {
     }
   }
 
+  public cleanupCamera(cameraId: string): void {
+    this.latestFrameByCamera.delete(cameraId);
+    this.webSourceSockets.delete(cameraId);
+    this.clearPendingFrame(cameraId);
+  }
+
   public syncInferenceStreamFocus(): void {
     const watchedCameras = new Set<string>();
     for (const camId of this.clientFocusCamera.values()) {
@@ -322,6 +350,70 @@ export class WebSocketManager {
         }
       }
     }
+  }
+
+  public getActiveModelStatus(): AiModelStatus {
+    return { ...this.activeModelStatus };
+  }
+
+  public setActiveModelStatus(status: Partial<AiModelStatus>): AiModelStatus {
+    this.activeModelStatus = {
+      ...this.activeModelStatus,
+      ...status,
+    };
+    return this.getActiveModelStatus();
+  }
+
+  public sendModelSwitchToInference(profile: 'trained' | 'stock'): boolean {
+    for (const sock of this.inferenceSockets.values()) {
+      if (sock.readyState === WebSocket.OPEN) {
+        try {
+          sock.send(
+            JSON.stringify({
+              type: 'switch_model',
+              profile,
+              timestamp: Date.now(),
+            })
+          );
+          return true;
+        } catch {
+          // Try next open inference socket
+        }
+      }
+    }
+    return false;
+  }
+
+  public getActiveTrackerStatus(): AiTrackerStatus {
+    return { ...this.activeTrackerStatus };
+  }
+
+  public setActiveTrackerStatus(status: Partial<AiTrackerStatus>): AiTrackerStatus {
+    this.activeTrackerStatus = {
+      ...this.activeTrackerStatus,
+      ...status,
+    };
+    return this.getActiveTrackerStatus();
+  }
+
+  public sendTrackerSwitchToInference(tracker: 'bytetrack' | 'botsort' | 'deepsort'): boolean {
+    for (const sock of this.inferenceSockets.values()) {
+      if (sock.readyState === WebSocket.OPEN) {
+        try {
+          sock.send(
+            JSON.stringify({
+              type: 'switch_tracker',
+              tracker,
+              timestamp: Date.now(),
+            })
+          );
+          return true;
+        } catch {
+          // Try next open inference socket
+        }
+      }
+    }
+    return false;
   }
 
   public getActiveCameras(): string[] {

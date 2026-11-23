@@ -12,11 +12,13 @@ function rawDataToBuffer(data: RawData): Buffer {
 export function handleClientConnection(ws: WebSocket): void {
   wsManager.registerClient(ws);
 
-  // Send initial handshake with active camera list
+  // Send initial handshake with active camera list, model profile, and tracking engine
   ws.send(
     JSON.stringify({
       type: 'connection_established',
       activeCameras: wsManager.getActiveCameras(),
+      modelStatus: wsManager.getActiveModelStatus(),
+      trackerStatus: wsManager.getActiveTrackerStatus(),
       timestamp: Date.now(),
     })
   );
@@ -188,6 +190,54 @@ export function handleClientConnection(ws: WebSocket): void {
             sourceValue: msg.sourceValue || 'test_1.mp4',
             loop: msg.loop ?? true,
           });
+          break;
+        }
+
+        case 'switch_ai_model': {
+          const profile = msg.profile === 'stock' ? 'stock' : 'trained';
+          const sent = wsManager.sendModelSwitchToInference(profile);
+          if (sent) {
+            const pendingStatus = wsManager.setActiveModelStatus({ switching: true });
+            wsManager.broadcastToClients({
+              type: 'ai_model_status',
+              ...pendingStatus,
+              timestamp: Date.now(),
+            });
+          } else {
+            ws.send(
+              JSON.stringify({
+                type: 'ai_model_status',
+                ...wsManager.getActiveModelStatus(),
+                switching: false,
+                timestamp: Date.now(),
+              })
+            );
+          }
+          break;
+        }
+
+        case 'switch_ai_tracker': {
+          const rawTracker = String(msg.tracker || 'bytetrack').toLowerCase();
+          const tracker =
+            rawTracker === 'botsort' || rawTracker === 'deepsort' ? rawTracker : 'bytetrack';
+          const sent = wsManager.sendTrackerSwitchToInference(tracker);
+          if (sent) {
+            const pendingTracker = wsManager.setActiveTrackerStatus({ switching: true });
+            wsManager.broadcastToClients({
+              type: 'ai_tracker_status',
+              ...pendingTracker,
+              timestamp: Date.now(),
+            });
+          } else {
+            ws.send(
+              JSON.stringify({
+                type: 'ai_tracker_status',
+                ...wsManager.getActiveTrackerStatus(),
+                switching: false,
+                timestamp: Date.now(),
+              })
+            );
+          }
           break;
         }
 

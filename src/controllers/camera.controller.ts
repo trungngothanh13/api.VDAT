@@ -114,6 +114,59 @@ export async function createCamera(req: Request, res: Response, next: NextFuncti
   }
 }
 
+const deleteCamerasSchema = z.object({
+  ids: z.array(z.string().trim().min(1)).min(1, 'Select at least one camera to delete'),
+});
+
+export async function deleteCamera(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.camera.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) {
+      res.status(404).json({ error: `Camera '${id}' not found` });
+      return;
+    }
+
+    await prisma.camera.delete({ where: { id } });
+    wsManager.cleanupCamera(id);
+    console.log(`🗑️ [Camera] Deleted camera slot '${id}'`);
+    res.json({ deleted: [id], count: 1 });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteCameras(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { ids } = deleteCamerasSchema.parse(req.body);
+    const uniqueIds = Array.from(new Set(ids));
+
+    const existing = await prisma.camera.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true },
+    });
+    const existingIds = existing.map((cam) => cam.id);
+
+    if (existingIds.length === 0) {
+      res.status(404).json({ error: 'None of the selected cameras were found' });
+      return;
+    }
+
+    const result = await prisma.camera.deleteMany({
+      where: { id: { in: existingIds } },
+    });
+
+    for (const id of existingIds) {
+      wsManager.cleanupCamera(id);
+    }
+
+    console.log(`🗑️ [Camera] Deleted ${result.count} camera slot(s): ${existingIds.join(', ')}`);
+    res.json({ deleted: existingIds, count: result.count });
+  } catch (err) {
+    next(err);
+  }
+}
+
 const updateZoneSchema = z.object({
   sourceKey: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1).optional(),

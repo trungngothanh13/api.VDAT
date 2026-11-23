@@ -61,6 +61,36 @@ export function handleInferenceConnection(ws: WebSocket): void {
           const resolvedMode = ingestMode || pipeline?.ingestMode || 'local';
           wsManager.registerInference(cameraId, ws, resolvedMode);
 
+          if (pipeline?.modelProfile || pipeline?.model) {
+            const prof = pipeline.modelProfile === 'stock' ? 'stock' : 'trained';
+            const updatedStatus = wsManager.setActiveModelStatus({
+              profile: prof,
+              modelName: pipeline.model ? path.basename(String(pipeline.model)) : prof === 'stock' ? 'yolo26l.pt' : 'best.pt',
+              confidence: typeof pipeline.confidence === 'number' ? pipeline.confidence : undefined,
+              switching: false,
+            });
+            wsManager.broadcastToClients({
+              type: 'ai_model_status',
+              ...updatedStatus,
+              timestamp: Date.now(),
+            });
+          }
+
+          if (pipeline?.tracker) {
+            const rawTracker = String(pipeline.tracker).toLowerCase();
+            const normalizedTracker =
+              rawTracker === 'botsort' || rawTracker === 'deepsort' ? rawTracker : 'bytetrack';
+            const updatedTracker = wsManager.setActiveTrackerStatus({
+              tracker: normalizedTracker,
+              switching: false,
+            });
+            wsManager.broadcastToClients({
+              type: 'ai_tracker_status',
+              ...updatedTracker,
+              timestamp: Date.now(),
+            });
+          }
+
           // Update camera in DB
           const camera = await prisma.camera.upsert({
             where: { id: cameraId },
@@ -214,6 +244,42 @@ export function handleInferenceConnection(ws: WebSocket): void {
             trackId: event.track_id,
             frameNumber: event.frame_number,
             evidenceClipUrl,
+          });
+          break;
+        }
+
+        case 'model_status': {
+          const prof = message.profile === 'stock' ? 'stock' : 'trained';
+          const updatedStatus = wsManager.setActiveModelStatus({
+            profile: prof,
+            modelName: String(message.modelName || (prof === 'stock' ? 'yolo26l.pt' : 'best.pt')),
+            confidence: typeof message.confidence === 'number' ? message.confidence : undefined,
+            switching: Boolean(message.switching),
+          });
+          console.log(
+            `🔁 [Inference WS] Active AI model switched -> ${updatedStatus.profile} (${updatedStatus.modelName})`
+          );
+          wsManager.broadcastToClients({
+            type: 'ai_model_status',
+            ...updatedStatus,
+            timestamp: Date.now(),
+          });
+          break;
+        }
+
+        case 'tracker_status': {
+          const rawTracker = String(message.tracker || 'bytetrack').toLowerCase();
+          const normalizedTracker =
+            rawTracker === 'botsort' || rawTracker === 'deepsort' ? rawTracker : 'bytetrack';
+          const updatedTracker = wsManager.setActiveTrackerStatus({
+            tracker: normalizedTracker,
+            switching: Boolean(message.switching),
+          });
+          console.log(`🧭 [Inference WS] Active AI tracker switched -> ${updatedTracker.tracker}`);
+          wsManager.broadcastToClients({
+            type: 'ai_tracker_status',
+            ...updatedTracker,
+            timestamp: Date.now(),
           });
           break;
         }
